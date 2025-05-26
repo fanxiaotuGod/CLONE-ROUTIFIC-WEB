@@ -1,0 +1,21 @@
+{
+  "name": "delivery-optimization-system",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "web",
+    "backend"
+  ],
+  "scripts": {
+    "dev:web": "cd web && npm run dev",
+    "dev:backend": "cd backend && npm run dev",
+    "build:web": "cd web && npm run build",
+    "build:backend": "cd backend && npm run build",
+    "test": "npm run test:web && npm run test:backend",
+    "test:web": "cd web && npm test",
+    "test:backend": "cd backend && npm test"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+} 
