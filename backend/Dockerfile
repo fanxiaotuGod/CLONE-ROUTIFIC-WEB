@@ -22,4 +22,4 @@ EXPOSE 3001
 
 # Define the command to run the application
 # This will be overridden by docker-compose command for development
-CMD ["npm", "start"] 
+CMD ["npx", "ts-node", "src/index.ts"] 

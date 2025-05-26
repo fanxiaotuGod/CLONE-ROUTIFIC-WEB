@@ -1,145 +1,103 @@
-import React, { useState } from 'react'
-import { Dialog, Transition } from '@headlessui/react'
+import React, { useState, useEffect } from 'react'
+import { Dialog } from '@headlessui/react'
+import { XMarkIcon } from '@heroicons/react/24/outline'
+
+export interface DeliveryFormData {
+  name: string
+  address: string
+  email: string
+  // Location, status, photoUrl, notes are removed as they will be handled by backend or are not part of initial form
+}
 
 interface DeliveryFormProps {
   isOpen: boolean
   onClose: () => void
-  onSubmit: (delivery: {
-    name: string
-    address: string
-    email: string
-  }) => void
+  onSubmit: (formData: DeliveryFormData) => void
+  initialData?: Partial<Pick<DeliveryFormData, 'name' | 'address' | 'email'>> // For editing, only these fields
 }
 
-const DeliveryForm: React.FC<DeliveryFormProps> = ({ isOpen, onClose, onSubmit }) => {
-  const [formData, setFormData] = useState({
-    name: '',
-    address: '',
-    email: ''
-  })
-  const [errors, setErrors] = useState<Record<string, string>>({})
+const DeliveryForm: React.FC<DeliveryFormProps> = ({ isOpen, onClose, onSubmit, initialData }) => {
+  const [name, setName] = useState('')
+  const [address, setAddress] = useState('')
+  const [email, setEmail] = useState('')
 
-  const validateEmail = (email: string) => {
-    const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-    return re.test(email)
-  }
+  useEffect(() => {
+    if (isOpen && initialData) {
+      setName(initialData.name || '')
+      setAddress(initialData.address || '')
+      setEmail(initialData.email || '')
+    } else if (isOpen && !initialData) {
+      // Reset form when opened for new entry
+      setName('')
+      setAddress('')
+      setEmail('')
+    }
+  }, [isOpen, initialData])
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    const newErrors: Record<string, string> = {}
-
-    if (!formData.name.trim()) {
-      newErrors.name = 'Name is required'
+    if (!name.trim() || !address.trim() || !email.trim()) {
+      alert('Name, Address, and Email are required.') // Basic validation
+      return
     }
-    if (!formData.address.trim()) {
-      newErrors.address = 'Address is required'
-    }
-    if (!formData.email.trim()) {
-      newErrors.email = 'Email is required'
-    } else if (!validateEmail(formData.email)) {
-      newErrors.email = 'Invalid email format'
-    }
-
-    if (Object.keys(newErrors).length === 0) {
-      onSubmit(formData)
-      setFormData({ name: '', address: '', email: '' })
-      onClose()
-    } else {
-      setErrors(newErrors)
-    }
+    onSubmit({
+      name,
+      address,
+      email,
+    })
   }
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const { name, value } = e.target
-    setFormData(prev => ({ ...prev, [name]: value }))
-    if (errors[name]) {
-      setErrors(prev => ({ ...prev, [name]: '' }))
-    }
-  }
+  if (!isOpen) return null
 
   return (
-    <Dialog
-      open={isOpen}
-      onClose={onClose}
-      className="fixed inset-0 z-30 overflow-y-auto"
-    >
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="fixed inset-0 bg-black opacity-30" />
-
-        <div className="relative bg-white rounded-lg max-w-md w-full mx-4 p-6">
-          <Dialog.Title className="text-lg font-medium text-gray-900 mb-4">
-            Add New Delivery
-          </Dialog.Title>
+    <Dialog open={isOpen} onClose={onClose} className="relative z-50">
+      <div className="fixed inset-0 bg-black/30 dark:bg-black/50" aria-hidden="true" />
+      <div className="fixed inset-0 flex items-center justify-center p-4">
+        <Dialog.Panel className="w-full max-w-md rounded-lg bg-white dark:bg-slate-800 p-6 shadow-xl">
+          <div className="flex justify-between items-center mb-6">
+            <Dialog.Title className="text-xl font-semibold text-gray-900 dark:text-slate-100">
+              {initialData?.name ? 'Edit Delivery' : 'Add New Delivery'}
+            </Dialog.Title>
+            <button 
+              type="button"
+              onClick={onClose} 
+              className="p-1 rounded-full text-gray-400 hover:text-gray-600 dark:text-slate-400 dark:hover:text-slate-200 hover:bg-gray-100 dark:hover:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-primary-500"
+              aria-label="Close"
+            >
+              <XMarkIcon className="h-6 w-6" />
+            </button>
+          </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label htmlFor="name" className="block text-sm font-medium text-gray-700">
-                Name
-              </label>
-              <input
-                type="text"
-                id="name"
-                name="name"
-                value={formData.name}
-                onChange={handleChange}
-                className={`input mt-1 ${errors.name ? 'border-red-500' : ''}`}
-              />
-              {errors.name && (
-                <p className="mt-1 text-sm text-red-600">{errors.name}</p>
-              )}
+              <label htmlFor="name" className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">Name / Description</label>
+              <input type="text" name="name" id="name" value={name} onChange={e => setName(e.target.value)} required className="mt-1 block w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-md shadow-sm focus:outline-none focus:ring-1 focus:ring-primary-500 focus:border-primary-500 sm:text-sm bg-white dark:bg-slate-700 text-gray-900 dark:text-slate-100" />
             </div>
-
             <div>
-              <label htmlFor="address" className="block text-sm font-medium text-gray-700">
-                Address
-              </label>
-              <input
-                type="text"
-                id="address"
-                name="address"
-                value={formData.address}
-                onChange={handleChange}
-                className={`input mt-1 ${errors.address ? 'border-red-500' : ''}`}
-              />
-              {errors.address && (
-                <p className="mt-1 text-sm text-red-600">{errors.address}</p>
-              )}
+              <label htmlFor="address" className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">Full Address</label>
+              <input type="text" name="address" id="address" value={address} onChange={e => setAddress(e.target.value)} required placeholder="e.g., 123 Main St, Vancouver, BC" className="mt-1 block w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-md shadow-sm focus:outline-none focus:ring-1 focus:ring-primary-500 focus:border-primary-500 sm:text-sm bg-white dark:bg-slate-700 text-gray-900 dark:text-slate-100" />
             </div>
-
             <div>
-              <label htmlFor="email" className="block text-sm font-medium text-gray-700">
-                Email
-              </label>
-              <input
-                type="email"
-                id="email"
-                name="email"
-                value={formData.email}
-                onChange={handleChange}
-                className={`input mt-1 ${errors.email ? 'border-red-500' : ''}`}
-              />
-              {errors.email && (
-                <p className="mt-1 text-sm text-red-600">{errors.email}</p>
-              )}
+              <label htmlFor="email" className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">Email</label>
+              <input type="email" name="email" id="email" value={email} onChange={e => setEmail(e.target.value)} required className="mt-1 block w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-md shadow-sm focus:outline-none focus:ring-1 focus:ring-primary-500 focus:border-primary-500 sm:text-sm bg-white dark:bg-slate-700 text-gray-900 dark:text-slate-100" />
             </div>
-
-            <div className="flex justify-end space-x-3 mt-6">
-              <button
-                type="button"
-                onClick={onClose}
-                className="btn btn-secondary"
+            <div className="flex justify-end space-x-3 pt-4">
+              <button 
+                type="button" 
+                onClick={onClose} 
+                className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-slate-200 bg-gray-100 dark:bg-slate-600 hover:bg-gray-200 dark:hover:bg-slate-500 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-offset-white dark:focus:ring-offset-slate-800 focus:ring-gray-400 dark:focus:ring-slate-500 transition-colors"
               >
                 Cancel
               </button>
-              <button
-                type="submit"
-                className="btn btn-primary"
+              <button 
+                type="submit" 
+                className="px-4 py-2 text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-offset-white dark:focus:ring-offset-slate-800 focus:ring-primary-500 transition-colors"
               >
-                Add Delivery
+                {initialData?.name ? 'Save Changes' : 'Add Delivery'}
               </button>
             </div>
           </form>
-        </div>
+        </Dialog.Panel>
       </div>
     </Dialog>
   )

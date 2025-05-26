@@ -1,14 +1,16 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import MapView from './components/MapView'
-import DeliveryForm from './components/DeliveryForm'
+import DeliveryForm, { type DeliveryFormData } from './components/DeliveryForm'
 import Layout from './components/Layout'
 import HorizontalRouteBar from './components/HorizontalRouteBar'
 import TopBar from './components/TopBar'
 import DeliveryDetailsPopup from './components/DeliveryDetailsPopup'
-import { exportRoutesToCsv } from './utils/exportCsv'
 import FinalizeModal from './components/FinalizeModal'
 import AddDriverForm from './components/AddDriverForm'
+import ConfirmationModal from './components/ConfirmationModal'
+import { exportRoutesToCsv } from './utils/exportCsv'
 import Papa from 'papaparse'
+import { Toaster, toast } from 'sonner'
 // import { OnDragEndResponder } from 'react-beautiful-dnd'; // Temporarily remove to use any
 
 interface Delivery {
@@ -32,9 +34,21 @@ interface BackendDelivery extends Omit<Delivery, 'location'> {
   lng: string; // From database DECIMAL
 }
 
+// Add Driver interface
+interface Driver {
+  id: string;
+  name: string;
+  email: string;
+  phone_number?: string | null;
+  cognito_sub?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 interface Route {
   id: string
-  driver: string
+  driverId: string | null; // Can be null for unassigned. Use driverId instead of name for consistency.
+  driverName: string;    // Keep driverName for display purposes.
   deliveries: Delivery[]
   color: string
   color_dimmed?: string
@@ -76,97 +90,111 @@ const enrichRoutesWithSummaries = (routesToEnrich: Omit<Route, 'totalStops' | 't
   });
 };
 
-// Data structure expected from DeliveryForm
-export interface DeliveryFormData {
-  name: string;
-  address: string;
-  email: string;
-  location: { // Assuming form provides location object
-    lat: number;
-    lng: number;
-  };
-  status?: string; // Optional, backend defaults to Pending
-  eta?: string;    // Optional
-  notes?: string;  // Optional
-  photoUrl?: string; // Optional
+interface ConfirmationModalStateProps {
+  title: string;
+  message: string | React.ReactNode;
+  onConfirm: () => void;
+  confirmButtonText?: string;
+  isDestructive?: boolean;
 }
 
 function App() {
   const [baseRoutes, setBaseRoutes] = useState<Omit<Route, 'totalStops' | 'totalDistance' | 'totalDuration'>[]>([]);
+  const [drivers, setDrivers] = useState<Driver[]>([]); // New state for drivers
   const [initialDataLoaded, setInitialDataLoaded] = useState(false);
   const [isLoading, setIsLoading] = useState(true); // For loading indicator
   const [errorLoading, setErrorLoading] = useState<string | null>(null); // For error message
   const [isDeliveryFormOpen, setIsDeliveryFormOpen] = useState(false); // State for DeliveryForm visibility
 
-  const fetchAndSetDeliveries = useCallback(async (isInitialLoad = false) => {
-    if (!isInitialLoad) setIsLoading(true); // Show loading indicator for explicit re-fetches
+  // New state for ConfirmationModal
+  const [isConfirmationModalOpen, setIsConfirmationModalOpen] = useState(false);
+  const [confirmationModalProps, setConfirmationModalProps] = useState<ConfirmationModalStateProps | null>(null);
+
+  const fetchAndSetInitialData = useCallback(async (isInitialLoad = false) => {
+    if (!isInitialLoad) setIsLoading(true);
     setErrorLoading(null);
     try {
-      console.log("[App Effect] Attempting to load deliveries from backend...");
-      const response = await fetch('http://localhost:3001/api/deliveries');
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      const backendDeliveries = await response.json() as BackendDelivery[];
-      console.log("[App Effect] Fetched deliveries from backend:", JSON.stringify(backendDeliveries, null, 2)); // Log the fetched data
+      console.log("[App] Fetching initial data (deliveries and drivers)...");
+      const [deliveriesResponse, driversResponse] = await Promise.all([
+        fetch('http://localhost:3001/api/deliveries'),
+        fetch('http://localhost:3001/api/drivers')
+      ]);
+
+      if (!deliveriesResponse.ok) throw new Error(`HTTP error fetching deliveries! status: ${deliveriesResponse.status}`);
+      if (!driversResponse.ok) throw new Error(`HTTP error fetching drivers! status: ${driversResponse.status}`);
+
+      const backendDeliveries = await deliveriesResponse.json() as BackendDelivery[];
+      const fetchedDrivers = await driversResponse.json() as Driver[];
+      
+      console.log("[App] Fetched Deliveries:", JSON.stringify(backendDeliveries, null, 2));
+      console.log("[App] Fetched Drivers:", JSON.stringify(fetchedDrivers, null, 2));
+      setDrivers(fetchedDrivers);
 
       const transformedDeliveries: Delivery[] = backendDeliveries.map(bd => ({
         ...bd,
-        location: {
-          lat: parseFloat(bd.lat),
-          lng: parseFloat(bd.lng),
-        },
+        location: { lat: parseFloat(bd.lat), lng: parseFloat(bd.lng) },
         photoUrl: bd.photoUrl || undefined,
         notes: bd.notes || undefined,
-      })); 
+      }));
 
-      if (transformedDeliveries.length > 0) {
-        setBaseRoutes([
-          {
-            id: 'unassigned-deliveries-route',
-            driver: 'Unassigned Deliveries',
-            color: '#808080',
-            color_dimmed: '#C0C0C0',
-            deliveries: transformedDeliveries.sort((a, b) => (a.name > b.name ? 1 : -1)),
-          },
-          // Add other routes here if needed, or they can be added by handleAddDriver
-        ]);
-      } else {
-         setBaseRoutes([
-          {
-            id: 'unassigned-deliveries-route',
-            driver: 'Unassigned Deliveries',
-            color: '#808080',
-            color_dimmed: '#C0C0C0',
-            deliveries: [],
-          },
-        ]);
-      }
-      console.log("[App Effect] baseRoutes set from backend data.");
+      const initialRoutes: Omit<Route, 'totalStops' | 'totalDistance' | 'totalDuration'>[] = [];
+      
+      // Always create the Unassigned Deliveries route
+      // It will hold all deliveries that are not yet assigned to a specific driver's route.
+      // Initially, this means ALL fetched deliveries.
+      initialRoutes.push({
+        id: 'unassigned-deliveries-route',
+        driverId: null,
+        driverName: 'Unassigned Deliveries',
+        color: '#808080', // Grey for unassigned
+        color_dimmed: '#C0C0C0',
+        deliveries: transformedDeliveries.sort((a,b) => (a.name > b.name ? 1 : -1)), 
+      });
+
+      // Create empty routes for each fetched driver
+      fetchedDrivers.forEach(driver => {
+        const randomColor = () => `#${Math.floor(Math.random()*16777215).toString(16).padStart(6, '0')}`;
+        const driverColor = randomColor();
+        initialRoutes.push({
+            id: `route-for-driver-${driver.id}`,
+            driverId: driver.id,
+            driverName: driver.name,
+            color: driverColor,
+            color_dimmed: `${driverColor}AA`,
+            deliveries: [], // Driver routes start empty
+        });
+      });
+
+      setBaseRoutes(initialRoutes);
+      console.log("[App] baseRoutes and drivers set. Unassigned contains all initial deliveries. Driver routes are empty.");
+      // toast.success('Initial data loaded successfully!'); // Optional: if you want a toast on initial load
+
     } catch (error) {
-      console.error("[App Effect] Error fetching deliveries:", error);
-      setErrorLoading("Failed to load delivery data. Please try again later.");
-      setBaseRoutes([
-          {
-            id: 'unassigned-deliveries-route',
-            driver: 'Unassigned Deliveries',
-            color: '#808080',
-            color_dimmed: '#C0C0C0',
-            deliveries: [],
-          },
-        ]);
+      console.error("[App] Error fetching initial data:", error);
+      const errorMessage = error instanceof Error ? error.message : "An unknown error occurred.";
+      setErrorLoading("Failed to load initial application data. Please try again later.");
+      toast.error(`Failed to load initial data: ${errorMessage}`);
+      setBaseRoutes([{
+        id: 'unassigned-deliveries-route',
+        driverId: null,
+        driverName: 'Unassigned Deliveries',
+        color: '#808080',
+        color_dimmed: '#C0C0C0',
+        deliveries: [],
+      }]);
+      setDrivers([]);
     } finally {
       setIsLoading(false);
       if (isInitialLoad) setInitialDataLoaded(true);
-      console.log("[App Effect] Data loading attempt (backend) complete.");
+      console.log("[App] Initial data loading attempt complete.");
     }
-  }, []); // Empty dependency array for useCallback, as it defines the function but doesn't run it directly.
+  }, []);
 
   useEffect(() => {
     if (!initialDataLoaded) {
-      fetchAndSetDeliveries(true); // Pass true for initial load
+      fetchAndSetInitialData(true);
     }
-  }, [initialDataLoaded, fetchAndSetDeliveries]);
+  }, [initialDataLoaded, fetchAndSetInitialData]);
 
   const routesWithSummaries = useMemo(() => {
     if (!initialDataLoaded) return [];
@@ -242,7 +270,8 @@ function App() {
       if (routesToUpdate.length === 0) {
         routesToUpdate.push({
           id: 'unassigned-deliveries-route',
-          driver: 'Unassigned Deliveries',
+          driverId: null,
+          driverName: 'Unassigned Deliveries',
           color: '#808080',
           color_dimmed: '#C0C0C0',
           deliveries: [],
@@ -274,81 +303,227 @@ function App() {
   };
 
   const handleCreateDelivery = async (formData: DeliveryFormData) => {
-    console.log("[App] Creating new delivery with form data:", formData);
+    console.log("[App] Creating new delivery with simplified form data:", formData);
     try {
-      const payload = {
-        ...formData,
-        lat: formData.location.lat,
-        lng: formData.location.lng,
-        status: formData.status || 'Pending' // Default status if not provided
-      };
-      // Remove nested location object from payload sent to backend
-      delete (payload as any).location; 
-
-      const response = await fetch('http://localhost:3001/api/deliveries', {
+      // The payload for the backend now only contains name, address, and email.
+      // The backend will handle geocoding and setting default status.
+      const response = await fetch('http://localhost:3001/api/deliveries/with-geocode', { // New endpoint
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(payload),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(formData), // Send { name, address, email }
       });
 
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+        const errorData = await response.json().catch(() => ({ message: 'Failed to create delivery or geocode address' }));
+        throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
       }
 
-      const createdBackendDelivery = await response.json() as BackendDelivery;
-      console.log("[App] Successfully created delivery via backend:", createdBackendDelivery);
-
-      // Transform backend delivery to frontend Delivery format
+      const createdBackendDelivery = await response.json() as BackendDelivery; // Expect full BackendDelivery object
+      
+      // Transform backend delivery (which includes lat/lng as strings) to frontend Delivery format
       const newDelivery: Delivery = {
         ...createdBackendDelivery,
-        location: {
-          lat: parseFloat(createdBackendDelivery.lat),
-          lng: parseFloat(createdBackendDelivery.lng),
+        location: { 
+          lat: parseFloat(createdBackendDelivery.lat), 
+          lng: parseFloat(createdBackendDelivery.lng) 
         },
         photoUrl: createdBackendDelivery.photoUrl || undefined,
         notes: createdBackendDelivery.notes || undefined,
+        status: createdBackendDelivery.status || 'Pending', // Ensure status is set
       };
 
       addDeliveriesToRoutes([newDelivery]);
-      setIsDeliveryFormOpen(false); // Close the form on successful creation
-      setRoutesGenerated(false); // New delivery might require re-generation of routes
+      setIsDeliveryFormOpen(false);
+      setRoutesGenerated(false); 
       setIsTimelineVisible(false);
-      // Consider re-fetching all deliveries after creating one to ensure data consistency
-      // await fetchAndSetDeliveries(); // Or just rely on local state update if backend returns the full new object correctly
-
+      toast.success(`Delivery "${newDelivery.name}" created successfully!`);
+      window.location.reload(); // Refresh after creating delivery
     } catch (error) {
       console.error("[App] Error creating delivery:", error);
-      alert(`Failed to create delivery: ${(error as Error).message}`); // Show error to user
-      // Optionally, do not close the form or handle error state in the form itself
+      toast.error(`Failed to create delivery: ${(error as Error).message}`);
     }
   };
 
+  const openConfirmationModal = (props: ConfirmationModalStateProps) => {
+    setConfirmationModalProps(props);
+    setIsConfirmationModalOpen(true);
+  };
+
+  const handleDeleteAllDeliveries = async () => {
+    openConfirmationModal({
+      title: 'Delete All Deliveries',
+      message: 'Are you sure you want to delete ALL deliveries? This action cannot be undone.',
+      isDestructive: true,
+      confirmButtonText: 'Delete All',
+      onConfirm: async () => {
+        console.log("[App] Confirmed: Deleting all deliveries...");
+        try {
+          const response = await fetch('http://localhost:3001/api/deliveries', { method: 'DELETE' });
+          if (!response.ok) {
+            const errorData = await response.json().catch(() => ({ message: 'Failed to delete deliveries' }));
+            throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
+          }
+          setBaseRoutes(prevRoutes => prevRoutes.map(route => ({ ...route, deliveries: [] })) );
+          setSelectedDeliveryId(null);
+          setRoutesGenerated(false);
+          setIsTimelineVisible(false);
+          toast.success('All deliveries have been deleted successfully.');
+          window.location.reload(); // Refresh after deleting all deliveries
+        } catch (error) {
+          console.error("[App] Error deleting all deliveries:", error);
+          toast.error(`Failed to delete all deliveries: ${(error as Error).message}`);
+        }
+      }
+    });
+  };
+
+  const handleDeleteAllDrivers = async () => {
+    openConfirmationModal({
+      title: 'Delete All Drivers',
+      message: 'Are you sure you want to delete ALL drivers? Their deliveries will be unassigned. This action cannot be undone.',
+      isDestructive: true,
+      confirmButtonText: 'Delete All',
+      onConfirm: async () => {
+        console.log("[App] Confirmed: Deleting all drivers...");
+        try {
+          const response = await fetch('http://localhost:3001/api/drivers', { method: 'DELETE' });
+          if (!response.ok) {
+            const errorData = await response.json().catch(() => ({ message: 'Failed to delete drivers' }));
+            throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
+          }
+
+          let allDeliveriesFromDrivers: Delivery[] = [];
+          baseRoutes.forEach(route => {
+            if (route.driverId !== null) { allDeliveriesFromDrivers = [...allDeliveriesFromDrivers, ...route.deliveries]; }
+          });
+          setDrivers([]);
+          setBaseRoutes(prevRoutes => {
+            const unassigned = prevRoutes.find(r => r.id === 'unassigned-deliveries-route') || { id: 'unassigned-deliveries-route', driverId: null, driverName: 'Unassigned Deliveries', color: '#808080', color_dimmed: '#C0C0C0', deliveries: [] };
+            unassigned.deliveries = [...unassigned.deliveries, ...allDeliveriesFromDrivers].sort((a,b) => (a.name > b.name ? 1 : -1));
+            return [unassigned]; 
+          });
+          setSelectedRouteId('unassigned-deliveries-route'); 
+          setRoutesGenerated(false);
+          setIsTimelineVisible(false);
+          toast.success('All drivers have been deleted. Deliveries moved to unassigned.');
+          window.location.reload(); // Refresh after deleting all drivers
+        } catch (error) {
+          console.error("[App] Error deleting all drivers:", error);
+          toast.error(`Failed to delete all drivers: ${(error as Error).message}`);
+        }
+      }
+    });
+  };
+
+  const handleDeleteSingleDelivery = async (deliveryIdToDelete: string, deliveryName?: string) => {
+    if (!deliveryIdToDelete) return;
+    openConfirmationModal({
+      title: 'Delete Delivery',
+      message: `Are you sure you want to delete delivery "${deliveryName || deliveryIdToDelete}"? This action cannot be undone.`,
+      isDestructive: true,
+      confirmButtonText: 'Delete',
+      onConfirm: async () => {
+        console.log(`[App] Confirmed: Deleting single delivery: ${deliveryIdToDelete}`);
+        try {
+          const response = await fetch(`http://localhost:3001/api/deliveries/${deliveryIdToDelete}`, { method: 'DELETE' });
+          if (!response.ok) {
+            const errorData = await response.json().catch(() => ({ message: 'Failed to delete delivery' }));
+            throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
+          }
+          setBaseRoutes(prevRoutes => prevRoutes.map(route => ({ ...route, deliveries: route.deliveries.filter(d => d.id !== deliveryIdToDelete) })) );
+          if (selectedDeliveryId === deliveryIdToDelete) setSelectedDeliveryId(null);
+          toast.success(`Delivery "${deliveryName || deliveryIdToDelete}" has been deleted successfully.`);
+          window.location.reload(); // Refresh after deleting a single delivery
+        } catch (error) {
+          console.error("[App] Error deleting single delivery:", error);
+          toast.error(`Failed to delete delivery "${deliveryName || deliveryIdToDelete}": ${(error as Error).message}`);
+        }
+      }
+    });
+  };
+
+  const handleDeleteSingleDriver = async (driverIdToDelete: string, driverName?: string) => {
+    if (!driverIdToDelete) return;
+    openConfirmationModal({
+      title: 'Delete Driver',
+      message: `Are you sure you want to delete driver "${driverName || driverIdToDelete}"? Their deliveries will be moved to Unassigned. This action cannot be undone.`,
+      isDestructive: true,
+      confirmButtonText: 'Delete',
+      onConfirm: async () => {
+        console.log(`[App] Confirmed: Deleting single driver: ${driverIdToDelete}`);
+        try {
+          const response = await fetch(`http://localhost:3001/api/drivers/${driverIdToDelete}`, { method: 'DELETE' });
+          if (!response.ok) {
+            const errorData = await response.json().catch(() => ({ message: 'Failed to delete driver' }));
+            throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
+          }
+
+          const driverRoute = baseRoutes.find(r => r.driverId === driverIdToDelete);
+          const deliveriesToReassign = driverRoute ? driverRoute.deliveries : [];
+          setDrivers(prevDrivers => prevDrivers.filter(d => d.id !== driverIdToDelete));
+          setBaseRoutes(prevRoutes => {
+            const remainingRoutes = prevRoutes.filter(r => r.driverId !== driverIdToDelete);
+            let unassignedRoute = remainingRoutes.find(r => r.id === 'unassigned-deliveries-route');
+            if (unassignedRoute) {
+              unassignedRoute.deliveries = [...unassignedRoute.deliveries, ...deliveriesToReassign].sort((a,b) => (a.name > b.name ? 1 : -1));
+            } else {
+              // This case should ideally not happen if unassigned-deliveries-route is always present
+              // or re-created if it was somehow removed. But as a fallback:
+              remainingRoutes.push({ id: 'unassigned-deliveries-route', driverId: null, driverName: 'Unassigned Deliveries', color: '#808080', color_dimmed: '#C0C0C0', deliveries: deliveriesToReassign.sort((a,b) => (a.name > b.name ? 1 : -1))});
+            }
+            return remainingRoutes;
+          });
+          if (selectedRouteId === `route-for-driver-${driverIdToDelete}`) setSelectedRouteId(null); 
+          setRoutesGenerated(false); 
+          setIsTimelineVisible(false); 
+          toast.success(`Driver "${driverName || driverIdToDelete}" deleted. Deliveries moved to unassigned.`);
+          window.location.reload(); // Refresh after deleting a single driver
+        } catch (error) {
+          console.error("[App] Error deleting single driver:", error);
+          toast.error(`Failed to delete driver "${driverName || driverIdToDelete}": ${(error as Error).message}`);
+        }
+      }
+    });
+  };
+
   const handleShowAllPoints = async () => {
-    console.log("[App.tsx] handleShowAllPoints called. Re-fetching deliveries...");
-    await fetchAndSetDeliveries(); // Re-fetch data
+    console.log("[App.tsx] handleShowAllPoints called. Re-fetching initial data...");
+    await fetchAndSetInitialData(); // Re-fetch all initial data (deliveries and drivers)
     setSelectedRouteId(null);
     console.log("[App.tsx] selectedRouteId set to null after re-fetch.");
   };
 
-  const handleAddDriver = (driverData: { name: string; email: string }) => {
-    console.log('Adding driver:', driverData);
-    const newRouteId = `route-driver-${Date.now()}`;
-    const randomColor = () => `#${Math.floor(Math.random()*16777215).toString(16).padStart(6, '0')}`;
-    const newDriverColor = randomColor();
-    const newDriverRoute: Omit<Route, 'totalStops' | 'totalDistance' | 'totalDuration'> = {
-      id: newRouteId,
-      driver: driverData.name,
-      color: newDriverColor,
-      color_dimmed: `${newDriverColor}AA`,
-      deliveries: [],
-    };
-    setBaseRoutes(prev => [...prev, newDriverRoute]);
-    setIsAddDriverFormOpen(false);
-    setRoutesGenerated(false);
-    setIsTimelineVisible(false);
+  const handleAddDriver = async (driverFormData: { name: string; email: string; phone_number?: string }) => {
+    console.log('Adding driver with data:', driverFormData);
+    try {
+      // Make actual API call to backend
+      const response = await fetch('http://localhost:3001/api/drivers', { 
+        method: 'POST', 
+        headers: { 'Content-Type': 'application/json' }, 
+        body: JSON.stringify(driverFormData) 
+      });
+
+      if (!response.ok) { 
+        const errorData = await response.json().catch(() => ({ message: 'Failed to add driver or parse error response' })); 
+        throw new Error(errorData.message || `HTTP error! status: ${response.status}`); 
+      }
+      
+      const newDriver = await response.json() as Driver; // Get the driver object from backend response
+      
+      setDrivers(prevDrivers => [...prevDrivers, newDriver]);
+      const randomColor = () => `#${Math.floor(Math.random()*16777215).toString(16).padStart(6, '0')}`;
+      const newDriverColor = randomColor();
+      const newDriverRoute: Omit<Route, 'totalStops' | 'totalDistance' | 'totalDuration'> = { id: `route-for-driver-${newDriver.id}`, driverId: newDriver.id, driverName: newDriver.name, color: newDriverColor, color_dimmed: `${newDriverColor}AA`, deliveries: [] };
+      setBaseRoutes(prev => [...prev, newDriverRoute]);
+      setIsAddDriverFormOpen(false);
+      setRoutesGenerated(false);
+      setIsTimelineVisible(false);
+      toast.success(`Driver "${newDriver.name}" added successfully!`);
+      window.location.reload(); // Refresh after adding a new driver
+    } catch (error) {
+      console.error('Error adding driver:', error);
+      toast.error(`Failed to add driver: ${(error as Error).message}`);
+    }
   };
 
   const handleRouteSelect = (routeId: string) => {
@@ -387,18 +562,25 @@ function App() {
 
   const handleFinalizeClick = () => {
     if (!routesGenerated) {
-      alert("Please generate routes first.");
+      toast.info("Please generate routes first.");
       return;
     }
-    setShowFinalizeModal(true)
-    const missing = routesWithSummaries.flatMap(r => r.deliveries).find(d => !d.email || !d.address)
-    if (missing) setFinalizeError('All deliveries must have an email and address.');
-    else setFinalizeError(null);
-  }
+    setShowFinalizeModal(true);
+    const missing = routesWithSummaries.flatMap(r => r.deliveries).find(d => !d.email || !d.address);
+    if (missing) {
+        setFinalizeError('All deliveries must have an email and address.');
+        toast.info('Cannot finalize: All deliveries must have an email and address.', { duration: 5000 });
+    } else {
+        setFinalizeError(null);
+    }
+  };
+
   const handleConfirmFinalize = () => {
-    setShowFinalizeModal(false)
-    alert('Routes finalized and emails sent!')
-  }
+    setShowFinalizeModal(false);
+    // TODO: Actual backend call for finalization
+    toast.success('Routes finalized and notifications sent! (Simulation)');
+  };
+
   const handleExport = () => {
     exportRoutesToCsv(filteredRoutes)
   }
@@ -408,8 +590,32 @@ function App() {
   }, [routesWithSummaries]);
 
   const filteredRoutes = useMemo(() => {
-    return effectiveRoutes;
+    console.log("[App Memo] Recalculating filteredRoutes. effectiveRoutes:", effectiveRoutes);
+    return effectiveRoutes.filter(route => {
+      if (route.id === 'unassigned-deliveries-route') {
+        console.log("[App Memo] Checking 'unassigned-deliveries-route':", route, "Deliveries count:", route.deliveries?.length);
+      }
+      if (route.id === 'unassigned-deliveries-route' && (!route.deliveries || route.deliveries.length === 0)) {
+        console.log("[App Memo] Filtering out empty 'unassigned-deliveries-route'");
+        return false;
+      }
+      return true;
+    });
   }, [effectiveRoutes]);
+
+  const deliveryColorMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    filteredRoutes.forEach(route => {
+      route.deliveries.forEach(delivery => {
+        map[delivery.id] = route.color;
+      });
+    });
+    return map;
+  }, [filteredRoutes]);
+
+  const deliveriesToDisplay = useMemo(() => {
+    return filteredRoutes.flatMap(route => route.deliveries);
+  }, [filteredRoutes]);
 
   const selectedDeliveryObj = useMemo(() => {
     return filteredRoutes.flatMap(r => r.deliveries).find(d => d.id === selectedDeliveryId) || null;
@@ -431,84 +637,137 @@ function App() {
     Papa.parse(file, {
       header: true,
       skipEmptyLines: true,
-      complete: (results) => {
-        const parsedData = results.data as { name?: string; address?: string; email?: string }[];
-        const newDeliveries: Delivery[] = [];
-        let importErrors = 0;
+      complete: async (results) => {
+        console.log("PapaParse raw results:", results); 
+        const parsedData = results.data as { Name?: string; Address?: string; Email?: string }[]; // Adjusted type for case-sensitivity
+        const itemsToProcess: { name: string; address: string; email: string; tempId: string }[] = [];
+        let parseErrors = 0;
 
         parsedData.forEach((item, index) => {
-          const name = item.name?.trim();
-          const address = item.address?.trim();
-          const email = item.email?.trim();
+          // Use correct casing for property access based on CSV headers
+          const name = item.Name?.trim();
+          const address = item.Address?.trim();
+          const email = item.Email?.trim();
 
           if (name && address && email) {
-            newDeliveries.push({
-              id: `csv-d${Date.now()}-${index}`,
-              name,
-              address,
-              email,
-              location: { lat: 49.2827 + (Math.random() - 0.5) * 0.05, lng: -123.1207 + (Math.random() - 0.5) * 0.05 },
-              status: 'Pending',
-              eta: 'TBD',
-            });
-          } else {
-            console.warn(`Skipping CSV row ${index + 1} due to missing data:`, item);
-            importErrors++;
+            // When pushing to itemsToProcess, use lowercase keys as expected by the backend BulkDeliveryItem interface
+            itemsToProcess.push({ name, address, email, tempId: `csv-temp-${index}` });
+          } else { 
+            console.warn(`Skipping CSV row ${index + 1} due to missing Name, Address, or Email (check casing):`, item);
+            parseErrors++; 
           }
         });
 
-        console.log('[CSV Load] newDeliveries created:', newDeliveries);
+        if (itemsToProcess.length === 0) {
+          if (parseErrors > 0) {
+            toast.error(`No valid deliveries to process from CSV. ${parseErrors} rows had missing data.`);
+          } else {
+            toast.info('CSV file was empty or contained no processable rows.');
+          }
+          return;
+        }
 
-        if (newDeliveries.length > 0) {
-          addDeliveriesToRoutes(newDeliveries);
-          setRoutesGenerated(false);
-          setIsTimelineVisible(false);
-          alert(`${newDeliveries.length} deliveries imported.` + (importErrors > 0 ? ` ${importErrors} rows skipped.` : ''));
-        } else if (importErrors > 0) {
-          alert(`No deliveries imported. ${importErrors} rows had errors.`);
-        } else {
-          alert('No valid deliveries in CSV or CSV empty.');
+        toast.loading(`Processing ${itemsToProcess.length} deliveries from CSV... This may take a moment.`, { id: 'csv-processing' });
+
+        try {
+          const response = await fetch('http://localhost:3001/api/deliveries/bulk-geocode-and-create', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(itemsToProcess),
+          });
+
+          const responseData = await response.json(); // responseData will contain { message, success, errors }
+
+          // Log the full response data from backend for better debugging regardless of status code
+          console.log("[App] Backend response from /bulk-geocode-and-create:", responseData);
+
+          if (!response.ok && response.status !== 207) { // 207 is Multi-Status (partial success)
+             // Even if all items failed (status 400), log detailed errors if available
+            if (responseData.errors && responseData.errors.length > 0) {
+              const errorMessages = responseData.errors.map((err: { item: any, error: string }) => `Failed for item "${err.item.name || JSON.stringify(err.item)}": ${err.error}`).join('\n');
+              console.error("CSV Processing Errors from Backend (all items failed scenario):\n", errorMessages);
+            }
+            throw new Error(responseData.message || `HTTP error! status: ${response.status}`);
+          }
+          
+          const { success: createdBackendDeliveries, errors: backendErrors } = responseData as { success: BackendDelivery[], errors: { item: any, error: string }[] };
+
+          const newDeliveries: Delivery[] = [];
+          if (createdBackendDeliveries && createdBackendDeliveries.length > 0) {
+            createdBackendDeliveries.forEach(bd => {
+              newDeliveries.push({
+                ...bd,
+                location: { lat: parseFloat(bd.lat), lng: parseFloat(bd.lng) },
+                photoUrl: bd.photoUrl || undefined,
+                notes: bd.notes || undefined,
+                status: bd.status || 'Pending',
+              });
+            });
+            addDeliveriesToRoutes(newDeliveries);
+            setRoutesGenerated(false); 
+            setIsTimelineVisible(false);
+          }
+
+          if (backendErrors && backendErrors.length > 0) {
+            const errorMessages = backendErrors.map(err => `Failed for "${err.item.name || 'Unknown'}": ${err.error}`).join('\n');
+            console.error("CSV Processing Errors from Backend (partial failure scenario):\n", errorMessages);
+            toast.error(
+              <div>
+                <p>{`Some deliveries failed processing (${backendErrors.length} of ${itemsToProcess.length + parseErrors}).`}</p>
+                {parseErrors > 0 && <p>{`${parseErrors} rows skipped due to missing data pre-upload.`}</p>}
+                <p className="mt-2 text-xs">Details in console.</p>
+              </div>,
+              { id: 'csv-processing', duration: 10000 }
+            );
+          } else if (newDeliveries.length > 0) {
+            toast.success(`${newDeliveries.length} deliveries imported and geocoded successfully!` + (parseErrors > 0 ? ` ${parseErrors} CSV rows skipped pre-upload.` : ''), { id: 'csv-processing' });
+          } else if (parseErrors > 0 && newDeliveries.length === 0 && (!backendErrors || backendErrors.length === 0)){
+            toast.info(`${parseErrors} CSV rows skipped due to missing data. No deliveries were processed.`, { id: 'csv-processing' });
+          } else if (itemsToProcess.length > 0 && newDeliveries.length === 0 && backendErrors && backendErrors.length === itemsToProcess.length) {
+            // This case is covered by the initial throw for 400 if all items failed, but good to have as a distinct toast if we didn't throw
+            toast.error('All deliveries failed processing. Check console for details.', { id: 'csv-processing' });
+          } else if (itemsToProcess.length > 0 && newDeliveries.length === 0 && (!backendErrors || backendErrors.length === 0)){
+            // This can happen if backend returns 200/201 with empty success and empty errors (should not happen with current backend logic)
+            toast.error('No deliveries were successfully imported, and no specific errors were reported by the backend. Check backend logs.', { id: 'csv-processing' });
+          }
+          window.location.reload(); // Refresh after CSV upload processing is complete
+        } catch (error) {
+          console.error('Error uploading/processing CSV deliveries:', error); // This is the line you saw: App.tsx:706
+          // The toast here will now show the message from the `throw new Error(...)` above if it was a backend-originated message
+          toast.error(`Error processing CSV: ${(error as Error).message}`, { id: 'csv-processing' });
+          window.location.reload(); // Also refresh on error during CSV processing
         }
       },
-      error: (error) => {
-        console.error('CSV Error:', error);
-        alert('Error parsing CSV. See console.');
+      error: (error: any) => { 
+        console.error('CSV Parsing Error:', error);
+        toast.error('Error parsing CSV file. Please check its format.'); 
+        window.location.reload(); // Refresh on CSV parsing error
       }
     });
   };
 
   const handleGenerateRoutes = () => {
-    let allDeliveries: Delivery[] = [];
-    baseRoutes.forEach(route => {
-        allDeliveries = [...allDeliveries, ...route.deliveries];
-    });
-    const routesWithoutDeliveries: Omit<Route, 'totalStops' | 'totalDistance' | 'totalDuration'>[] = baseRoutes.map(r => ({ 
-        id: r.id,
-        driver: r.driver,
-        color: r.color,
-        color_dimmed: r.color_dimmed,
-        deliveries: [] 
-    }));
-
-    if (routesWithoutDeliveries.length === 0 && allDeliveries.length > 0) {
-        alert("Please add at least one driver before generating routes.");
+    const allUnassignedDeliveries = baseRoutes.find(r => r.id === 'unassigned-deliveries-route')?.deliveries || [];
+    const actualDriverRoutes = baseRoutes.filter(r => r.driverId !== null);
+    if (actualDriverRoutes.length === 0 && allUnassignedDeliveries.length > 0) {
+        toast.info("Please add at least one driver before generating routes.");
         return;
     }
-    if (allDeliveries.length === 0){
-        alert("No deliveries to assign. Please upload deliveries via CSV.");
-        return;
+    if (allUnassignedDeliveries.length === 0){
+        toast.info("No unassigned deliveries to distribute. Please upload or add deliveries."); return;
     }
-
-    const numDrivers = routesWithoutDeliveries.length;
-    const finalUpdatedRoutes = routesWithoutDeliveries.map((route, driverIndex) => {
-        const assignedDeliveries = allDeliveries.filter((_, deliveryIndex) => deliveryIndex % numDrivers === driverIndex);
+    const numDrivers = actualDriverRoutes.length;
+    const updatedRoutes = baseRoutes.map(route => {
+        if (route.driverId === null) { return { ...route, deliveries: [] }; }
+        const driverIndex = actualDriverRoutes.findIndex(dr => dr.id === route.id);
+        if (driverIndex === -1) return route;
+        const assignedDeliveries = allUnassignedDeliveries.filter((_, deliveryIndex) => deliveryIndex % numDrivers === driverIndex);
         return { ...route, deliveries: assignedDeliveries };
     });
-
-    setBaseRoutes(finalUpdatedRoutes);
+    setBaseRoutes(updatedRoutes);
     setRoutesGenerated(true);
     setIsTimelineVisible(true);
-    alert('Routes generated!');
+    toast.success('Routes generated successfully!');
   };
 
   const topBarProps = {
@@ -522,7 +781,8 @@ function App() {
     onUploadDeliveries: handleUploadDeliveries,
     darkMode,
     onToggleDarkMode: () => setDarkMode(!darkMode),
-    onShowAllPointsClick: handleShowAllPoints, // Pass the new handler
+    onDeleteAllDeliveries: handleDeleteAllDeliveries,
+    onDeleteAllDrivers: handleDeleteAllDrivers,
   }
 
   useEffect(() => {
@@ -573,11 +833,13 @@ function App() {
 
   return (
     <Layout topBarProps={topBarProps}>
+      <Toaster position="top-right" richColors closeButton theme={darkMode ? 'dark' : 'light'} />
       <div className="absolute inset-0 w-full h-full z-0">
         <MapView
-          routes={filteredRoutes}
-          selectedRoute={selectedRouteId}
-          onMarkerClick={handleMarkerClick}
+          // deliveries={deliveriesToDisplay} // Removed: MapView fetches its own data
+          // selectedDeliveryId={selectedDeliveryId} // Removed: MapView manages its own selection or doesn't need it
+          onMarkerClick={handleMarkerClick} // Keep if MapView still uses this for callback
+          deliveryColorMap={deliveryColorMap} // Keep if MapView still uses this for colors
         />
       </div>
 
@@ -585,6 +847,7 @@ function App() {
         <DeliveryDetailsPopup
           delivery={selectedDeliveryObj}
           onClose={() => setSelectedDeliveryId(null)}
+          onDeleteDelivery={() => handleDeleteSingleDelivery(selectedDeliveryObj.id, selectedDeliveryObj.name)}
         />
       )}
 
@@ -606,6 +869,7 @@ function App() {
               onNodeClick={handleMarkerClick}
               onDragEnd={handleDragEndStops}
               onExport={handleExport}
+              onDeleteDriver={handleDeleteSingleDriver}
             />
           </div>
         </div>
@@ -635,6 +899,18 @@ function App() {
           onClose={() => setIsDeliveryFormOpen(false)}
           onSubmit={handleCreateDelivery} 
           // You might need to pass other props like existing delivery data if using for editing
+        />
+      )}
+
+      {isConfirmationModalOpen && confirmationModalProps && (
+        <ConfirmationModal
+          isOpen={isConfirmationModalOpen}
+          onClose={() => setIsConfirmationModalOpen(false)}
+          title={confirmationModalProps.title}
+          message={confirmationModalProps.message}
+          onConfirm={confirmationModalProps.onConfirm}
+          confirmButtonText={confirmationModalProps.confirmButtonText}
+          isDestructive={confirmationModalProps.isDestructive}
         />
       )}
     </Layout>

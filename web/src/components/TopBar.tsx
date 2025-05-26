@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
-  CalendarIcon, ArrowDownTrayIcon, ClockIcon, UserPlusIcon, MoonIcon, SunIcon, InboxArrowDownIcon, DocumentArrowUpIcon, CogIcon, CheckCircleIcon, EyeIcon
+  CalendarIcon, ArrowDownTrayIcon, ClockIcon, UserPlusIcon, MoonIcon, SunIcon, InboxArrowDownIcon, DocumentArrowUpIcon, CogIcon, CheckCircleIcon, TrashIcon, ExclamationTriangleIcon
 } from '@heroicons/react/24/outline';
 
 interface TopBarProps {
@@ -14,7 +14,8 @@ interface TopBarProps {
   darkMode: boolean;
   onToggleDarkMode: () => void;
   onAddDeliveryClick?: () => void;
-  onShowAllPointsClick?: () => void;
+  onDeleteAllDeliveries?: () => void;
+  onDeleteAllDrivers?: () => void;
 }
 
 const TopBar: React.FC<TopBarProps> = ({
@@ -28,14 +29,40 @@ const TopBar: React.FC<TopBarProps> = ({
   darkMode,
   onToggleDarkMode,
   onAddDeliveryClick,
-  onShowAllPointsClick
+  onDeleteAllDeliveries,
+  onDeleteAllDrivers,
 }) => {
+  const [isDeleteDropdownOpen, setIsDeleteDropdownOpen] = useState(false);
+  const deleteDropdownRef = useRef<HTMLDivElement>(null);
+
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
       onUploadDeliveries(file);
       event.target.value = '';
     }
+  };
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (deleteDropdownRef.current && !deleteDropdownRef.current.contains(event.target as Node)) {
+        setIsDeleteDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, []);
+
+  const handleDeleteAllDeliveriesClick = () => {
+    onDeleteAllDeliveries?.();
+    setIsDeleteDropdownOpen(false);
+  };
+
+  const handleDeleteAllDriversClick = () => {
+    onDeleteAllDrivers?.();
+    setIsDeleteDropdownOpen(false);
   };
 
   return (
@@ -74,11 +101,31 @@ const TopBar: React.FC<TopBarProps> = ({
 
         <button onClick={onAddDriver} className="btn btn-secondary btn-sm flex items-center"><UserPlusIcon className="h-4 w-4 mr-1" /> <span className="hidden sm:inline">Add Driver</span></button>
         
-        {onShowAllPointsClick && (
-          <button onClick={onShowAllPointsClick} className="btn btn-secondary btn-sm flex items-center" title="Show all delivery points">
-            <EyeIcon className="h-4 w-4 mr-1" /> <span className="hidden sm:inline">Show All</span>
+        <div className="relative" ref={deleteDropdownRef}>
+          <button 
+            onClick={() => setIsDeleteDropdownOpen(prev => !prev)} 
+            className="btn btn-danger-outline btn-sm flex items-center" 
+            title="Delete options"
+          >
+            <TrashIcon className="h-4 w-4 mr-1" /> <span className="hidden sm:inline">Delete</span>
           </button>
-        )}
+          {isDeleteDropdownOpen && (
+            <div className="absolute right-0 mt-2 w-56 origin-top-right bg-white dark:bg-slate-700 rounded-md shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none py-1 z-50">
+              <button
+                onClick={handleDeleteAllDeliveriesClick}
+                className="w-full text-left px-4 py-2 text-sm text-red-700 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/20 flex items-center"
+              >
+                <ExclamationTriangleIcon className="h-4 w-4 mr-2" /> Delete All Deliveries
+              </button>
+              <button
+                onClick={handleDeleteAllDriversClick}
+                className="w-full text-left px-4 py-2 text-sm text-red-700 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/20 flex items-center"
+              >
+                <ExclamationTriangleIcon className="h-4 w-4 mr-2" /> Delete All Drivers
+              </button>
+            </div>
+          )}
+        </div>
 
         {routesGenerated ? (
           <button onClick={onFinalize} className="btn btn-success btn-sm flex items-center transition-all duration-300 ease-in-out">

@@ -1,6 +1,6 @@
 import React from 'react';
 import { DragDropContext, Droppable, Draggable } from 'react-beautiful-dnd';
-import { ClockIcon, MapPinIcon, ArrowsRightLeftIcon, ArrowDownTrayIcon } from '@heroicons/react/24/outline';
+import { ClockIcon, MapPinIcon, ArrowsRightLeftIcon, ArrowDownTrayIcon, XMarkIcon } from '@heroicons/react/24/outline';
 
 interface Delivery {
   id: string;
@@ -13,7 +13,8 @@ interface Delivery {
 
 interface Route {
   id: string;
-  driver: string;
+  driverId: string | null;
+  driverName: string;
   deliveries: Delivery[];
   color: string;
   color_dimmed?: string; // Might still be used for circle border or future styling
@@ -29,6 +30,7 @@ interface HorizontalRouteBarProps {
   onNodeClick?: (deliveryId: string) => void;
   onDragEnd: (result: any) => void;
   onExport: () => void;
+  onDeleteDriver?: (driverId: string, driverName: string) => void;
 }
 
 const HorizontalRouteBar: React.FC<HorizontalRouteBarProps> = ({ 
@@ -37,10 +39,18 @@ const HorizontalRouteBar: React.FC<HorizontalRouteBarProps> = ({
   onRouteSelect, 
   onNodeClick, 
   onDragEnd, 
-  onExport
+  onExport,
+  onDeleteDriver
 }) => {
   const leftPanelWidth = "w-80"; // Increased from w-56 to w-80 (20rem / 320px)
   const statsFixedWidth = "w-36"; // For stats section to ensure alignment: 9rem / 144px
+
+  const handleDeleteDriverClick = (e: React.MouseEvent, driverId: string | null, driverName: string) => {
+    e.stopPropagation(); // Prevent onRouteSelect from firing
+    if (driverId && onDeleteDriver) {
+      onDeleteDriver(driverId, driverName);
+    }
+  };
 
   return (
     <div className="w-full h-full bg-transparent p-2 flex flex-col overflow-auto select-none">
@@ -69,10 +79,10 @@ const HorizontalRouteBar: React.FC<HorizontalRouteBarProps> = ({
         <div className="space-y-1.5 min-w-[700px] pb-2 flex-grow">
           {routes.map((route) => (
             <Droppable droppableId={route.id} direction="horizontal" key={route.id}>
-              {(provided) => (
+              {(providedDrop) => (
                 <div
-                  ref={provided.innerRef}
-                  {...provided.droppableProps}
+                  ref={providedDrop.innerRef}
+                  {...providedDrop.droppableProps}
                   className={`flex flex-row items-stretch p-1.5 rounded-lg transition-all shadow-sm hover:shadow-md dark:hover:shadow-slate-600 ${selectedRouteId === route.id ? 'bg-primary-50/80 dark:bg-primary-500/30 ring-1 ring-primary-400 dark:ring-primary-600' : 'bg-white/80 dark:bg-slate-700/70 hover:bg-gray-50/80 dark:hover:bg-slate-600/70'}`}
                   style={{ minHeight: 52 }}
                   onClick={() => onRouteSelect?.(route.id)}
@@ -80,11 +90,20 @@ const HorizontalRouteBar: React.FC<HorizontalRouteBarProps> = ({
                   {/* Left Panel: Driver Info + Stats */}
                   <div className={`${leftPanelWidth} flex items-center flex-shrink-0 pr-2`}>
                     <div 
-                      className={`flex items-center justify-center font-semibold text-xs text-white mr-2 h-7 px-2.5 rounded-md shadow-sm flex-shrink-0`}
+                      className={`relative flex items-center justify-center font-semibold text-xs text-white mr-2 h-7 px-2.5 rounded-md shadow-sm flex-shrink-0`}
                       style={{ backgroundColor: route.color }}
-                      title={`Driver: ${route.driver}`}
+                      title={route.driverId ? `Driver: ${route.driverName}` : 'Unassigned Deliveries'}
                     >
-                      <span className="overflow-hidden text-ellipsis whitespace-nowrap">{route.driver}</span> 
+                      <span className="overflow-hidden text-ellipsis whitespace-nowrap pr-1">{route.driverName}</span> 
+                      {route.driverId && onDeleteDriver && (
+                        <button 
+                          onClick={(e) => handleDeleteDriverClick(e, route.driverId, route.driverName)}
+                          className="absolute -top-1 -right-1 p-0.5 bg-red-500 hover:bg-red-600 text-white rounded-full shadow-md opacity-80 hover:opacity-100 transition-opacity duration-150"
+                          title={`Delete driver ${route.driverName}`}
+                        >
+                          <XMarkIcon className="h-3 w-3" />
+                        </button>
+                      )}
                     </div>
                     
                     <div className={`flex items-center text-xs text-gray-600 dark:text-slate-300 ${statsFixedWidth} gap-x-1.5 justify-start ml-auto`}>
@@ -110,11 +129,11 @@ const HorizontalRouteBar: React.FC<HorizontalRouteBarProps> = ({
                   <div className="flex-1 flex items-center space-x-1.5 py-1 pr-1 overflow-x-auto">
                     {route.deliveries.map((delivery, idx) => (
                       <Draggable draggableId={delivery.id} index={idx} key={delivery.id}>
-                        {(provided, snapshot) => (
+                        {(providedDrag, snapshot) => (
                           <div
-                            ref={provided.innerRef}
-                            {...provided.draggableProps}
-                            {...provided.dragHandleProps}
+                            ref={providedDrag.innerRef}
+                            {...providedDrag.draggableProps}
+                            {...providedDrag.dragHandleProps}
                             className={`w-4 h-4 rounded-full cursor-grab flex-shrink-0 border ${snapshot.isDragging ? 'ring-2 ring-offset-1' : ''} dark:border-slate-500`}
                             onClick={(e) => {
                               e.stopPropagation(); 
@@ -129,7 +148,7 @@ const HorizontalRouteBar: React.FC<HorizontalRouteBarProps> = ({
                         )}
                       </Draggable>
                     ))}
-                    {provided.placeholder}
+                    {providedDrop.placeholder}
                   </div>
                 </div>
               )}
