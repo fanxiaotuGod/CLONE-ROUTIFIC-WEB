@@ -42,8 +42,8 @@ const HorizontalRouteBar: React.FC<HorizontalRouteBarProps> = ({
   onExport,
   onDeleteDriver
 }) => {
-  const leftPanelWidth = "w-80"; // Increased from w-56 to w-80 (20rem / 320px)
-  const statsFixedWidth = "w-36"; // For stats section to ensure alignment: 9rem / 144px
+  const leftPanelWidth = "w-96"; // Kept from previous change: 24rem / 384px
+  const statsFixedWidth = "w-56"; // Increased from w-36 to w-56 (14rem / 224px)
 
   const handleDeleteDriverClick = (e: React.MouseEvent, driverId: string | null, driverName: string) => {
     e.stopPropagation(); // Prevent onRouteSelect from firing
@@ -109,15 +109,17 @@ const HorizontalRouteBar: React.FC<HorizontalRouteBarProps> = ({
                     <div className={`flex items-center text-xs text-gray-600 dark:text-slate-300 ${statsFixedWidth} gap-x-1.5 justify-start ml-auto`}>
                       <div className="flex items-center flex-shrink min-w-0" title="Number of stops">
                         <MapPinIcon className="h-3.5 w-3.5 mr-0.5 text-gray-400 dark:text-slate-500"/> 
-                        <span className="overflow-hidden text-ellipsis whitespace-nowrap">{route.totalStops !== undefined ? route.totalStops : '-'}</span>
+                        <span className="">{route.totalStops !== undefined ? route.totalStops : '-'}</span>
                       </div>
-                      <div className="flex items-center flex-shrink min-w-0" title="Total distance">
-                        <ArrowsRightLeftIcon className="h-3.5 w-3.5 mr-0.5 text-gray-400 dark:text-slate-500"/>
-                        <span className="overflow-hidden text-ellipsis whitespace-nowrap">{route.totalDistance || '-'}</span>
-                      </div>
+                      {route.totalDistance && (
+                        <div className="flex items-center flex-shrink min-w-0" title="Total distance">
+                          <ArrowsRightLeftIcon className="h-3.5 w-3.5 mr-0.5 text-gray-400 dark:text-slate-500"/>
+                          <span className="">{route.totalDistance || '-'}</span>
+                        </div>
+                      )}
                       <div className="flex items-center flex-shrink min-w-0" title="Total duration">
                         <ClockIcon className="h-3.5 w-3.5 mr-0.5 text-gray-400 dark:text-slate-500"/>
-                        <span className="overflow-hidden text-ellipsis whitespace-nowrap">{route.totalDuration || '-'}</span>
+                        <span className="">{route.totalDuration || '-'}</span>
                       </div>
                     </div>
                   </div>

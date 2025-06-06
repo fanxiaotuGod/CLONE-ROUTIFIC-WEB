@@ -1,17 +1,35 @@
-import React from 'react';
+import React, { ReactNode } from 'react';
 // import Sidebar from './Sidebar'; // Sidebar is no longer imported or used
 import TopBar from './TopBar';
 
-const Layout: React.FC<{ // Removed SidebarProps as it's no longer used
-  children: React.ReactNode;
-  topBarProps: any; // Consider defining a more specific type for topBarProps
-}> = ({ children, topBarProps }) => {
+interface TopBarProps {
+  selectedDate: string;
+  onDateChange: (date: string) => void;
+  onFinalize: () => void;
+  onGenerateRoutes: () => void;
+  routesGenerated: boolean;
+  onAddDriver: () => void;
+  onUploadDeliveries: (file: File) => void;
+  darkMode: boolean;
+  onToggleDarkMode: () => void;
+  onDeleteAllDeliveries?: () => void;
+  onDeleteAllDrivers?: () => void;
+}
+
+interface LayoutProps {
+  children: ReactNode;
+  topBarProps: TopBarProps;
+}
+
+const Layout: React.FC<LayoutProps> = ({ children, topBarProps }) => {
   return (
-    <div className="relative w-screen h-screen overflow-hidden bg-gray-100 dark:bg-slate-900 text-slate-900 dark:text-slate-50">
-      {children} {/* MapView will be passed here and take full screen */}
-      <TopBar {...topBarProps} /> {/* TopBar is fixed, full-width, z-40 */}
-      {/* <Sidebar /> Sidebar component removed from here */}
-      {/* Other floating elements like timeline, popups will be direct children of App, positioned over the map */}
+    <div className="flex h-screen bg-gray-50 dark:bg-slate-900 text-gray-800 dark:text-slate-200">
+      <div className="flex-1 flex flex-col pl-20"> {/* Add left padding for the sidebar */}
+        <TopBar {...topBarProps} />
+        <main className="flex-1 w-full h-full pt-16"> {/* Add top padding for the TopBar */}
+          {children}
+        </main>
+      </div>
     </div>
   );
 };

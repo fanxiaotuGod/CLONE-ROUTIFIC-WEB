@@ -1,16 +1,16 @@
-Name,Address,Email
-Shipment Alpha,777 Dunsmuir St Vancouver BC,alpha@example.com
-Package Bravo,1234 Granville St Vancouver,bravo@example.com
-Parcel Charlie,275 13th St E North Vancouver BC,charlie@example.com
-Delivery Delta,4567 Lougheed Hwy Burnaby,delta@example.com
-Goods Echo,3999 Henning Dr #103 Burnaby BC,echo@example.com
-Consignment Foxtrot,4088 Hastings St Burnaby BC,foxtrot@example.com
-Freight Golf,3700 Willingdon Ave Burnaby BC,golf@example.com
-Cargo Hotel,4090 Hastings St Burnaby BC,hotel@example.com
-Load India,4925 Kingsway Burnaby BC,india@example.com
-Shipment Juliet,5242 Kingsway Burnaby BC,juliet@example.com
-Package Kilo,4331 Dominion St Burnaby BC,kilo@example.com
-Parcel Lima,1720 Willingdon Ave Burnaby BC,lima@example.com
-Delivery Mike,4500 Kingsway Burnaby BC,mike@example.com
-Goods November,5358 Grimmer St Burnaby BC,november@example.com
-Consignment Oscar,2999 Underhill Ave #104 Burnaby BC,oscar@example.com
+Name,Address,Email,lat,lng
+Shipment Alpha,777 Dunsmuir St Vancouver BC,alpha@example.com,49.2845,-123.1215
+Package Bravo,1234 Granville St Vancouver,bravo@example.com,49.2794,-123.1254
+Parcel Charlie,275 13th St E North Vancouver BC,charlie@example.com,49.3115,-123.0700
+Delivery Delta,4567 Lougheed Hwy Burnaby,delta@example.com,49.2669,-122.9946
+Goods Echo,3999 Henning Dr #103 Burnaby BC,echo@example.com,49.2786,-123.0125
+Consignment Foxtrot,4088 Hastings St Burnaby BC,foxtrot@example.com,49.2839,-123.0118
+Freight Golf,3700 Willingdon Ave Burnaby BC,golf@example.com,49.2500,-123.0019
+Cargo Hotel,4090 Hastings St Burnaby BC,hotel@example.com,49.2839,-123.0116
+Load India,4925 Kingsway Burnaby BC,india@example.com,49.2312,-122.9972
+Shipment Juliet,5242 Kingsway Burnaby BC,juliet@example.com,49.2238,-122.9868
+Package Kilo,4331 Dominion St Burnaby BC,kilo@example.com,49.2514,-123.0069
+Parcel Lima,1720 Willingdon Ave Burnaby BC,lima@example.com,49.2721,-123.0031
+Delivery Mike,4500 Kingsway Burnaby BC,mike@example.com,49.2361,-123.0044
+Goods November,5358 Grimmer St Burnaby BC,november@example.com,49.2223,-122.9840
+Consignment Oscar,2999 Underhill Ave #104 Burnaby BC,oscar@example.com,49.2555,-122.9348
