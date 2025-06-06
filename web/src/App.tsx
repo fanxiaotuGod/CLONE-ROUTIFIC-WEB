@@ -1,7 +1,8 @@
 // This is a test comment to see if any edits can be applied.
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react'
+import { withAuthenticator, WithAuthenticatorProps } from '@aws-amplify/ui-react';
+import '@aws-amplify/ui-react/styles.css';
 import MapView from './components/MapView'
-import DeliveryForm, { type DeliveryFormData } from './components/DeliveryForm'
 import Layout from './components/Layout'
 import HorizontalRouteBar from './components/HorizontalRouteBar'
 import TopBar from './components/TopBar'
@@ -9,110 +10,15 @@ import DeliveryDetailsPanel from './components/DeliveryDetailsPanel'
 import FinalizeModal from './components/FinalizeModal'
 import AddDriverForm from './components/AddDriverForm'
 import ConfirmationModal from './components/ConfirmationModal'
-import { exportRoutesToCsv } from './utils/exportCsv'
-import Papa from 'papaparse'
-import { Toaster, toast } from 'sonner'
-import { getOptimizedRoutes } from './services/routificApi';
-import type { RoutificInput, RoutificSolution, Stop } from './services/routificApi';
-import { useRoutes } from './hooks/useRoutes';
-import SpinnerOverlay from './components/SpinnerOverlay'
+import { Toaster } from 'sonner'
+import { useRoutes, type Route, type Delivery, type Driver } from './hooks/useRoutes';
+import SpinnerOverlay from './components/SpinnerOverlay';
 import LeftSidebar, { ViewType } from './components/LeftSidebar'
 import DriversPage from './components/DriversPage';
 import DeliveriesPage from './components/DeliveriesPage';
 import SettingsPage from './components/SettingsPage';
 
-interface Delivery {
-  id: string
-  name: string
-  address: string
-  email: string
-  location: {
-    lat: number
-    lng: number
-  }
-  status: string
-  eta: string
-  photoUrl?: string
-  notes?: string
-  duration?: number;
-}
-
-// Backend Delivery type - database returns lat/lng as strings
-interface BackendDelivery extends Omit<Delivery, 'location'> {
-  lat: string; // From database DECIMAL
-  lng: string; // From database DECIMAL
-}
-
-// Add Driver interface
-interface Driver {
-  id: string;
-  name: string;
-  email: string;
-  phone_number?: string | null;
-  cognito_sub?: string | null;
-  created_at: string;
-  updated_at: string;
-  start_location?: {
-    lat: number;
-    lng: number;
-    name: string;
-  }
-}
-
-interface Route {
-  id: string
-  driverId: string | null; // Can be null for unassigned. Use driverId instead of name for consistency.
-  driverName: string;    // Keep driverName for display purposes.
-  deliveries: Delivery[]
-  color: string
-  color_dimmed?: string
-  totalStops?: number
-  totalDistance?: string
-  totalDuration?: string
-}
-
-function formatDuration(minutes: number): string {
-  const h = Math.floor(minutes / 60);
-  const m = minutes % 60;
-  let durationStr = '';
-  if (h > 0) durationStr += `${h}h `;
-  if (m > 0 || h === 0) durationStr += `${m}m`; // Show 0m if no hours
-  return durationStr.trim();
-}
-
-const enrichRoutesWithSummaries = (routesToEnrich: Omit<Route, 'totalStops' | 'totalDistance' | 'totalDuration'>[]): Route[] => {
-  return routesToEnrich.map(route => {
-    const totalStops = route.deliveries.length;
-    
-    const baseDistanceKm = 5; 
-    const distancePerStopKm = 3.5;
-    const totalDistance = baseDistanceKm + totalStops * distancePerStopKm;
-
-    const baseDurationMinutes = 20; 
-    const serviceTimePerStopMinutes = 10;
-    const travelTimeBetweenStopsMinutes = 5;
-    const totalDurationMinutes = baseDurationMinutes + 
-                                 (totalStops * serviceTimePerStopMinutes) + 
-                                 (totalStops > 0 ? (totalStops -1) * travelTimeBetweenStopsMinutes : 0);
-
-    return {
-      ...route,
-      totalStops,
-      totalDistance: `${totalDistance.toFixed(1)}km`,
-      totalDuration: formatDuration(totalDurationMinutes),
-    };
-  });
-};
-
-interface ConfirmationModalStateProps {
-  title: string;
-  message: string | React.ReactNode;
-  onConfirm: () => void;
-  confirmButtonText?: string;
-  isDestructive?: boolean;
-}
-
-function App() {
+function App({ signOut, user }: WithAuthenticatorProps) {
   const {
     isLoading,
     initialDataLoaded,
@@ -139,6 +45,7 @@ function App() {
     handleDeleteAllDeliveries,
     handleDeleteAllDrivers,
     handleExportRoutes,
+    handleFinalizeAndSend,
   } = useRoutes();
 
   // UI-only state
@@ -189,7 +96,7 @@ function App() {
       document.documentElement.classList.remove('dark');
     }
   }, [darkMode]);
-
+  
   const handleAddDriverSubmit = (driverData: { name: string; email: string; }) => {
     handleAddDriver(driverData);
     setIsAddDriverFormOpen(false); // Close modal after submission
@@ -274,6 +181,14 @@ function App() {
     });
   };
 
+  interface ConfirmationModalStateProps {
+    title: string;
+    message: string | React.ReactNode;
+    onConfirm: () => void;
+    confirmButtonText?: string;
+    isDestructive?: boolean;
+  }
+
   const topBarProps = {
     selectedDate,
     onDateChange: setSelectedDate,
@@ -286,6 +201,8 @@ function App() {
     onToggleDarkMode: () => setDarkMode(!darkMode),
     onDeleteAllDeliveries: handleDeleteAllDeliveriesClick,
     onDeleteAllDrivers: handleDeleteAllDriversClick,
+    signOut,
+    user,
   };
 
   if (!initialDataLoaded && isLoading) {
@@ -362,9 +279,12 @@ function App() {
         <FinalizeModal
           open={showFinalizeModal}
           onClose={() => setShowFinalizeModal(false)}
-          onFinalize={() => { /* handler to be added to useRoutes */ }}
-          error={undefined} 
-          summary={"Finalize routes summary"}
+          onFinalize={() => {
+            handleFinalizeAndSend(routes);
+            setShowFinalizeModal(false);
+          }}
+          error={undefined}
+          summary={`${routes.filter(r => r.driverId).flatMap(r => r.deliveries).length} deliveries across ${routes.filter(r => r.driverId).length} routes.`}
         />
       )}
 
@@ -379,4 +299,4 @@ function App() {
   );
 }
 
-export default App 
+export default withAuthenticator(App); 

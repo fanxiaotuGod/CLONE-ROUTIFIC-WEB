@@ -1,0 +1,12 @@
+[
+  {
+    "Action": [
+      "ses:SendEmail",
+      "ses:SendRawEmail"
+    ],
+    "Resource": [
+      "*"
+    ],
+    "Effect": "Allow"
+  }
+]

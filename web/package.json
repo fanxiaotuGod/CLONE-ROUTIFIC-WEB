@@ -10,10 +10,12 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@aws-amplify/ui-react": "^6.11.2",
     "@headlessui/react": "^1.7.17",
     "@heroicons/react": "^2.0.18",
     "@react-google-maps/api": "^2.20.6",
     "autoprefixer": "^10.4.16",
+    "aws-amplify": "^6.15.0",
     "axios": "^1.9.0",
     "papaparse": "^5.5.3",
     "postcss": "^8.4.31",

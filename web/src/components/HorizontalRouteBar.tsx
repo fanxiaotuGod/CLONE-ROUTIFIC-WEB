@@ -1,27 +1,7 @@
 import React from 'react';
 import { DragDropContext, Droppable, Draggable } from 'react-beautiful-dnd';
 import { ClockIcon, MapPinIcon, ArrowsRightLeftIcon, ArrowDownTrayIcon, XMarkIcon } from '@heroicons/react/24/outline';
-
-interface Delivery {
-  id: string;
-  name: string; // Keep for title attribute on node
-  address: string; // Keep for title attribute on node
-  email: string;
-  eta?: string; // Keep for title attribute on node
-  status?: string;
-}
-
-interface Route {
-  id: string;
-  driverId: string | null;
-  driverName: string;
-  deliveries: Delivery[];
-  color: string;
-  color_dimmed?: string; // Might still be used for circle border or future styling
-  totalStops?: number;
-  totalDistance?: string;
-  totalDuration?: string;
-}
+import type { Route, Delivery } from '../hooks/useRoutes';
 
 interface HorizontalRouteBarProps {
   routes: Route[];

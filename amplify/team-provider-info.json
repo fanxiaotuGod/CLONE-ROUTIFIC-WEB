@@ -1,0 +1,29 @@
+{
+  "dev": {
+    "awscloudformation": {
+      "AuthRoleName": "amplify-cloneroutificweb-dev-afa98-authRole",
+      "UnauthRoleArn": "arn:aws:iam::396913700179:role/amplify-cloneroutificweb-dev-afa98-unauthRole",
+      "AuthRoleArn": "arn:aws:iam::396913700179:role/amplify-cloneroutificweb-dev-afa98-authRole",
+      "Region": "eu-west-1",
+      "DeploymentBucketName": "amplify-cloneroutificweb-dev-afa98-deployment",
+      "UnauthRoleName": "amplify-cloneroutificweb-dev-afa98-unauthRole",
+      "StackName": "amplify-cloneroutificweb-dev-afa98",
+      "StackId": "arn:aws:cloudformation:eu-west-1:396913700179:stack/amplify-cloneroutificweb-dev-afa98/2223edf0-42b1-11f0-8725-067c04d5e0a9",
+      "AmplifyAppId": "d3jc10zthpzz3v"
+    },
+    "categories": {
+      "auth": {
+        "cloneroutificweb3b273dcf": {}
+      },
+      "function": {
+        "sendEmailFunction": {
+          "deploymentBucketName": "amplify-cloneroutificweb-dev-afa98-deployment",
+          "s3Key": "amplify-builds/sendEmailFunction-597343526f766543572b-build.zip"
+        }
+      },
+      "api": {
+        "cloneroutificweb": {}
+      }
+    }
+  }
+}

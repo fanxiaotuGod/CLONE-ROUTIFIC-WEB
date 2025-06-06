@@ -1,5 +1,6 @@
 import React from 'react';
 import { TrashIcon, XMarkIcon } from '@heroicons/react/24/outline';
+import type { Delivery } from '../hooks/useRoutes';
 
 const statusColors: Record<string, string> = {
   'Completed': 'bg-green-100 text-green-800 dark:bg-green-500/20 dark:text-green-300 border-green-400',
@@ -10,16 +11,7 @@ const statusColors: Record<string, string> = {
 };
 
 interface DeliveryDetailsPanelProps {
-  delivery: {
-    id: string;
-    name: string;
-    address: string;
-    email?: string;
-    status: string;
-    eta: string;
-    photoUrl?: string;
-    notes?: string;
-  } | null;
+  delivery: Delivery | null;
   onClose: () => void;
   onDeleteDelivery?: (deliveryId: string) => void;
 }
@@ -66,14 +58,14 @@ const DeliveryDetailsPanel: React.FC<DeliveryDetailsPanelProps> = ({ delivery, o
               <p className="text-sm text-gray-800 dark:text-slate-200">{delivery.email}</p>
             </div>
           )}
-
+      
           <div>
             <h3 className="text-sm font-semibold text-gray-700 dark:text-slate-300 mb-1">Proof of Delivery</h3>
-            {delivery.photoUrl ? (
-              <img src={delivery.photoUrl} alt="Proof of Delivery" className="w-full h-40 object-cover rounded border border-gray-200 dark:border-slate-600" />
-            ) : (
+        {delivery.photoUrl ? (
+          <img src={delivery.photoUrl} alt="Proof of Delivery" className="w-full h-40 object-cover rounded border border-gray-200 dark:border-slate-600" />
+        ) : (
               <div className="w-full h-40 bg-gray-100 dark:bg-slate-700 flex items-center justify-center rounded border border-gray-200 dark:border-slate-600 text-gray-400 dark:text-slate-500">No Photo Uploaded</div>
-            )}
+        )}
           </div>
           
           {delivery.notes && (
@@ -88,12 +80,12 @@ const DeliveryDetailsPanel: React.FC<DeliveryDetailsPanelProps> = ({ delivery, o
       {/* Footer */}
       {onDeleteDelivery && (
         <div className="mt-4 pt-4 border-t border-gray-200 dark:border-slate-700">
-          <button 
-            onClick={handleDeleteClick}
-            className="w-full flex items-center justify-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 dark:bg-red-500 dark:hover:bg-red-600"
-          >
-            <TrashIcon className="h-4 w-4 mr-2" /> Delete Delivery
-          </button>
+        <button 
+          onClick={handleDeleteClick}
+          className="w-full flex items-center justify-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 dark:bg-red-500 dark:hover:bg-red-600"
+        >
+          <TrashIcon className="h-4 w-4 mr-2" /> Delete Delivery
+        </button>
         </div>
       )}
     </div>

@@ -1,0 +1,29 @@
+# This "input" configures a global authorization rule to enable public access to
+# all models in this schema. Learn more about authorization rules here: https://docs.amplify.aws/cli/graphql/authorization-rules
+input AMPLIFY { globalAuthRule: AuthRule = { allow: public } } # FOR TESTING ONLY!
+
+type Delivery @model {
+  id: ID!
+  name: String!
+  address: String!
+  email: String
+  lat: Float!
+  lng: Float!
+  status: String
+  duration: Int
+  owner: String
+  photoUrl: String
+  notes: String
+}
+
+type Driver @model {
+  id: ID!
+  name: String!
+  email: String!
+  owner: String
+}
+
+type Mutation {
+  sendEmail(to: String!, customerName: String!, eta: String!, summary: String!): String
+    @function(name: "sendEmailFunction-${env}")
+}

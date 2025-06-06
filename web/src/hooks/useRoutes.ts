@@ -4,39 +4,87 @@ import Papa from 'papaparse';
 import { getOptimizedRoutes } from '../services/routificApi';
 import type { RoutificInput, RoutificSolution, Stop } from '../services/routificApi';
 import { exportRoutesToCsv } from '../utils/exportCsv';
+import { generateClient, type GraphQLResult } from 'aws-amplify/api';
+import * as mutations from '../graphql/mutations';
+import * as queries from '../graphql/queries';
 
-// Re-defining interfaces here to make the hook self-contained.
-// In a larger app, these might live in a central types file.
-export interface Delivery {
+// Manually define types since API.ts is not being generated reliably
+interface APIDelivery {
+  __typename: "Delivery";
   id: string;
   name: string;
   address: string;
-  email: string;
-  location: {
-    lat: number;
-    lng: number;
-  };
-  status: string;
-  eta: string;
-  photoUrl?: string;
-  notes?: string;
-  duration?: number;
+  email?: string | null;
+  lat: number;
+  lng: number;
+  status?: string | null;
+  duration?: number | null;
+  createdAt: string;
+  updatedAt: string;
+  owner?: string | null;
+  photoUrl?: string | null;
+  notes?: string | null;
 }
 
-export interface Driver {
+interface APIDriver {
+  __typename: "Driver";
   id: string;
   name: string;
   email: string;
-  phone_number?: string | null;
-  cognito_sub?: string | null;
-  created_at: string;
-  updated_at: string;
-  start_location?: {
-    lat: number;
-    lng: number;
-    name: string;
-  };
+  createdAt: string;
+  updatedAt: string;
+  owner?: string | null;
 }
+
+// Manually define the shape of the query results
+interface ListDeliveriesQuery {
+  listDeliveries?: {
+    __typename: "ModelDeliveryConnection";
+    items: Array<APIDelivery | null>;
+    nextToken?: string | null;
+  } | null;
+}
+
+interface ListDriversQuery {
+  listDrivers?: {
+    __typename: "ModelDriverConnection";
+    items: Array<APIDriver | null>;
+    nextToken?: string | null;
+  } | null;
+}
+
+interface CreateDeliveryMutation {
+  createDelivery?: APIDelivery | null;
+}
+
+interface CreateDriverMutation {
+  createDriver?: APIDriver | null;
+}
+
+const client = generateClient();
+
+// Using a type assertion to match the existing Delivery interface
+export type Delivery = {
+  id: string;
+  name: string;
+  address: string;
+  email?: string | null;
+  lat: number;
+  lng: number;
+  status?: string | null;
+  duration?: number | null;
+  createdAt: string;
+  updatedAt: string;
+  owner?: string | null;
+  photoUrl?: string | null;
+  notes?: string | null;
+  location: { lat: number; lng: number };
+  eta?: string;
+};
+
+export type Driver = Omit<APIDriver, "__typename"> & {
+  start_location?: { lat: number; lng: number; name: string };
+};
 
 export interface Route {
   id: string;
@@ -50,14 +98,12 @@ export interface Route {
   totalDuration?: string;
 }
 
-// Helper to calculate duration from HH:MM time strings
 const timeToMinutes = (timeStr: string): number => {
   if (!timeStr || !timeStr.includes(':')) return 0;
   const [hours, minutes] = timeStr.split(':').map(Number);
   return hours * 60 + minutes;
 };
 
-// Helper function to create summaries for routes
 const enrichAndSummarizeRoutes = (
   routesToEnrich: Omit<Route, 'totalStops' | 'totalDistance' | 'totalDuration'>[],
   apiSolution: RoutificSolution | null
@@ -86,12 +132,11 @@ const enrichAndSummarizeRoutes = (
     return {
       ...route,
       totalStops: route.deliveries.length,
-      totalDistance: undefined, // Real distance is not available per-route from API
+      totalDistance: undefined,
       totalDuration: apiSolution ? formatDuration(totalDuration) : '-',
     };
   });
 };
-
 
 export const useRoutes = () => {
   const [baseRoutes, setBaseRoutes] = useState<Omit<Route, 'totalStops' | 'totalDistance' | 'totalDuration'>[]>([]);
@@ -103,49 +148,59 @@ export const useRoutes = () => {
   const [apiSolution, setApiSolution] = useState<RoutificSolution | null>(null);
   const [depotLocation, setDepotLocation] = useState({ lat: 49.2827, lng: -123.1207, name: "Main Depot" });
 
-  const MOCK_DRIVERS: Driver[] = [
-    { id: 'driver-1', name: 'John Doe', email: 'john.doe@example.com', created_at: new Date().toISOString(), updated_at: new Date().toISOString(), start_location: { name: "Depot", lat: 49.2827, lng: -123.1207 } },
-    { id: 'driver-2', name: 'Jane Smith', email: 'jane.smith@example.com', created_at: new Date().toISOString(), updated_at: new Date().toISOString(), start_location: { name: "Depot", lat: 49.2827, lng: -123.1207 } },
-  ];
-
-  const MOCK_DELIVERIES: Delivery[] = [
-      { id: 'del-1', name: 'Customer A', address: '100 Main St, Vancouver, BC', email: 'a@test.com', location: { lat: 49.2820, lng: -123.1200 }, status: 'Pending', eta: 'N/A', duration: 10 },
-      { id: 'del-2', name: 'Customer B', address: '200 Granville St, Vancouver, BC', email: 'b@test.com', location: { lat: 49.2850, lng: -123.1110 }, status: 'Pending', eta: 'N/A', duration: 10 },
-      { id: 'del-3', name: 'Customer C', address: '300 Robson St, Vancouver, BC', email: 'c@test.com', location: { lat: 49.2795, lng: -123.1254 }, status: 'Pending', eta: 'N/A', duration: 10 },
-  ];
-
-  const fetchAndSetInitialData = useCallback(() => {
+  const fetchAndSetInitialData = useCallback(async () => {
     setIsLoading(true);
-    const fetchedDrivers = MOCK_DRIVERS;
-    const transformedDeliveries = MOCK_DELIVERIES;
+    try {
+      const [driverData, deliveryData] = await Promise.all([
+        client.graphql({ query: queries.listDrivers, authMode: 'apiKey' }) as unknown as GraphQLResult<ListDriversQuery>,
+        client.graphql({ query: queries.listDeliveries, authMode: 'apiKey' }) as unknown as GraphQLResult<ListDeliveriesQuery>
+      ]);
 
-    setDrivers(fetchedDrivers);
+      const fetchedDrivers: Driver[] = (driverData.data?.listDrivers?.items || []).map((d) => ({
+        ...(d as APIDriver),
+        start_location: { name: depotLocation.name, lat: depotLocation.lat, lng: depotLocation.lng }
+      }));
+      
+      const transformedDeliveries: Delivery[] = (deliveryData.data?.listDeliveries?.items || []).map((d) => ({
+        ...(d as APIDelivery),
+        location: { lat: d!.lat, lng: d!.lng },
+      }));
 
-    const initialRoutes: Omit<Route, 'totalStops' | 'totalDistance' | 'totalDuration'>[] = [];
-    initialRoutes.push({
-      id: 'unassigned-deliveries-route',
-      driverId: null,
-      driverName: 'Unassigned Deliveries',
-      color: '#808080',
-      color_dimmed: '#C0C0C0',
-      deliveries: transformedDeliveries,
-    });
+      console.log('Deliveries fetched from DB:', transformedDeliveries);
+      console.log('Raw delivery data from API:', deliveryData.data?.listDeliveries?.items);
 
-    fetchedDrivers.forEach(driver => {
-      const randomColor = () => `#${Math.floor(Math.random()*16777215).toString(16).padStart(6, '0')}`;
+      setDrivers(fetchedDrivers);
+
+      const initialRoutes: Omit<Route, 'totalStops' | 'totalDistance' | 'totalDuration'>[] = [];
       initialRoutes.push({
-          id: `route-for-driver-${driver.id}`,
-          driverId: driver.id,
-          driverName: driver.name,
-          color: randomColor(),
-          deliveries: [],
+        id: 'unassigned-deliveries-route',
+        driverId: null,
+        driverName: 'Unassigned Deliveries',
+        color: '#808080',
+        color_dimmed: '#C0C0C0',
+        deliveries: transformedDeliveries,
       });
-    });
 
-    setBaseRoutes(initialRoutes);
-    setIsLoading(false);
-    setInitialDataLoaded(true);
-  }, []);
+      fetchedDrivers.forEach(driver => {
+        const randomColor = () => `#${Math.floor(Math.random()*16777215).toString(16).padStart(6, '0')}`;
+        initialRoutes.push({
+            id: `route-for-driver-${driver.id}`,
+            driverId: driver.id,
+            driverName: driver.name,
+            color: randomColor(),
+            deliveries: [],
+        });
+      });
+
+      setBaseRoutes(initialRoutes);
+    } catch (error) {
+      console.error('Error fetching initial data:', JSON.stringify(error, null, 2));
+      toast.error('Failed to load data from the cloud.');
+    } finally {
+      setIsLoading(false);
+      setInitialDataLoaded(true);
+    }
+  }, [depotLocation]);
 
   useEffect(() => {
     if (!initialDataLoaded) {
@@ -153,29 +208,45 @@ export const useRoutes = () => {
     }
   }, [initialDataLoaded, fetchAndSetInitialData]);
 
-  const handleAddDriver = useCallback((driverFormData: { name: string; email: string; }) => {
-    const newDriver: Driver = {
+  const handleAddDriver = useCallback(async (driverFormData: { name: string; email: string; }) => {
+    const optimisticDriver: Driver = {
       ...driverFormData,
-      id: `driver-${Date.now()}`,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
+      id: `temp-${Date.now()}`,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      owner: 'local',
       start_location: { name: depotLocation.name, lat: depotLocation.lat, lng: depotLocation.lng },
     };
+  
+    setDrivers(prev => [...prev, optimisticDriver]);
+  
+    try {
+      const result = await client.graphql({
+        query: mutations.createDriver,
+        variables: { input: driverFormData },
+        authMode: 'apiKey'
+      }) as unknown as GraphQLResult<CreateDriverMutation>;
+      const newDriver = { ...(result.data?.createDriver as APIDriver), start_location: { name: depotLocation.name, lat: depotLocation.lat, lng: depotLocation.lng } } as Driver;
 
-    setDrivers(prev => [...prev, newDriver]);
-
-    const randomColor = () => `#${Math.floor(Math.random()*16777215).toString(16).padStart(6, '0')}`;
-    const newRoute: Omit<Route, 'totalStops' | 'totalDistance' | 'totalDuration'> = {
-      id: `route-for-driver-${newDriver.id}`,
-      driverId: newDriver.id,
-      driverName: newDriver.name,
-      color: randomColor(),
-      deliveries: [],
-    };
-
-    setBaseRoutes(prev => [...prev, newRoute]);
-    toast.success(`Driver "${newDriver.name}" added successfully!`);
-    setRoutesGenerated(false);
+      setDrivers(prev => prev.map((d: Driver) => d.id === optimisticDriver.id ? newDriver : d));
+      
+      const randomColor = () => `#${Math.floor(Math.random()*16777215).toString(16).padStart(6, '0')}`;
+      const newRoute: Omit<Route, 'totalStops' | 'totalDistance' | 'totalDuration'> = {
+        id: `route-for-driver-${newDriver.id}`,
+        driverId: newDriver.id,
+        driverName: newDriver.name,
+        color: randomColor(),
+        deliveries: [],
+      };
+      setBaseRoutes(prev => [...prev, newRoute]);
+      
+      toast.success(`Driver "${newDriver.name}" added successfully!`);
+      setRoutesGenerated(false);
+    } catch (error) {
+      console.error('Error creating driver:', error);
+      toast.error('Failed to add driver.');
+      setDrivers(prev => prev.filter(d => d.id !== optimisticDriver.id));
+    }
   }, [depotLocation]);
 
   const handleUploadDeliveries = useCallback((file: File) => {
@@ -183,50 +254,62 @@ export const useRoutes = () => {
         header: true,
         skipEmptyLines: true,
         complete: (results) => {
-            const parsedData = results.data as { Name?: string; Address?: string; Email?: string, lat?:string, lng?:string }[];
-            const newDeliveries: Delivery[] = [];
+            const parsedData = results.data as { Name?: string; Address?: string; Email?: string; lat?:string, lng?:string }[];
             let parseErrors = 0;
 
-            parsedData.forEach((item, index) => {
+            const newDeliveriesPromises = parsedData.map(async (item, index) => {
+                console.log(`[handleUploadDeliveries] Processing CSV row ${index}:`, item);
                 const name = item.Name?.trim();
                 const address = item.Address?.trim();
                 const email = item.Email?.trim();
                 const lat = parseFloat(item.lat || '');
                 const lng = parseFloat(item.lng || '');
+                
+                console.log(`[handleUploadDeliveries] Parsed values - name: ${name}, address: ${address}, email: ${email}, lat: ${lat}, lng: ${lng}`);
 
                 if (name && address && email && !isNaN(lat) && !isNaN(lng)) {
-                    newDeliveries.push({
-                        id: `csv-del-${Date.now()}-${index}`,
-                        name,
-                        address,
-                        email,
-                        location: { lat, lng },
-                        status: 'Pending',
-                        eta: 'N/A',
-                        duration: 10
-                    });
+                    try {
+                      const deliveryInput = { name, address, email, lat, lng, duration: 10, status: 'Pending' };
+                      console.log(`[handleUploadDeliveries] Sending to database:`, deliveryInput);
+                      const result = await client.graphql({
+                        query: mutations.createDelivery,
+                        variables: { input: deliveryInput },
+                        authMode: 'apiKey'
+                      }) as unknown as GraphQLResult<CreateDeliveryMutation>;
+                      console.log(`[handleUploadDeliveries] Database response:`, result.data?.createDelivery);
+                      return { ...(result.data?.createDelivery as APIDelivery), location: { lat, lng } } as Delivery;
+                    } catch (error) {
+                      console.error('Error creating delivery:', JSON.stringify(error, null, 2));
+                      parseErrors++;
+                      return null;
+                    }
                 } else {
                     parseErrors++;
+                    return null;
                 }
             });
-
-            if (newDeliveries.length > 0) {
-                setBaseRoutes(prevRoutes => {
-                    const unassignedRouteIndex = prevRoutes.findIndex(r => r.id === 'unassigned-deliveries-route');
-                    const updatedRoutes = [...prevRoutes];
-                    if (unassignedRouteIndex !== -1) {
-                        const unassignedRoute = updatedRoutes[unassignedRouteIndex];
-                        unassignedRoute.deliveries = [...unassignedRoute.deliveries, ...newDeliveries];
-                    }
-                    return updatedRoutes;
-                });
-                toast.success(`${newDeliveries.length} deliveries imported successfully!`);
-                setRoutesGenerated(false);
-            }
             
-            if (parseErrors > 0) {
-                toast.error(`${parseErrors} rows in the CSV had missing or invalid data and were skipped.`);
-            }
+            Promise.all(newDeliveriesPromises).then(newDeliveries => {
+              const successfulDeliveries = newDeliveries.filter((d: Delivery | null): d is Delivery => d !== null);
+
+              if (successfulDeliveries.length > 0) {
+                  setBaseRoutes(prevRoutes => {
+                      const unassignedRouteIndex = prevRoutes.findIndex(r => r.id === 'unassigned-deliveries-route');
+                      const updatedRoutes = [...prevRoutes];
+                      if (unassignedRouteIndex !== -1) {
+                          const unassignedRoute = updatedRoutes[unassignedRouteIndex];
+                          unassignedRoute.deliveries = [...unassignedRoute.deliveries, ...successfulDeliveries];
+                      }
+                      return updatedRoutes;
+                  });
+                  toast.success(`${successfulDeliveries.length} deliveries imported successfully!`);
+                  setRoutesGenerated(false);
+              }
+              
+              if (parseErrors > 0) {
+                  toast.error(`${parseErrors} rows in the CSV had missing or invalid data and were skipped.`);
+              }
+            });
         },
         error: (error: any) => {
             toast.error('Error parsing CSV file. Please check its format.');
@@ -234,32 +317,238 @@ export const useRoutes = () => {
     });
   }, []);
 
-  const handleDragEndStops = useCallback((result: any) => {
-    const { source, destination, draggableId } = result;
-    // Do nothing if dropped outside a list, or if it's not a reorder in the same list
-    if (!destination || source.droppableId !== destination.droppableId) return;
-
-    const routeId = destination.droppableId;
-    setBaseRoutes(prevRoutes => {
-      const routeIndex = prevRoutes.findIndex(r => r.id === routeId);
-      if (routeIndex === -1) return prevRoutes;
-
-      const newRoutes = [...prevRoutes];
-      const routeToUpdate = { ...newRoutes[routeIndex] };
-      const newDeliveries = [...routeToUpdate.deliveries];
-      
-      const movedDelivery = newDeliveries.find(d => d.id === draggableId);
-      if (!movedDelivery) return prevRoutes; // Should not happen
-
-      // Reorder the array
-      newDeliveries.splice(source.index, 1);
-      newDeliveries.splice(destination.index, 0, movedDelivery);
-      
-      routeToUpdate.deliveries = newDeliveries;
-      newRoutes[routeIndex] = routeToUpdate;
-      return newRoutes;
-    });
+  const handleDeleteDelivery = useCallback(async (deliveryId: string) => {
+    const originalRoutes = [...baseRoutes];
+    
+    // Optimistic UI update
+    const newRoutes = baseRoutes.map(route => ({
+      ...route,
+      deliveries: route.deliveries.filter(d => d.id !== deliveryId)
+    }));
+    setBaseRoutes(newRoutes);
     setRoutesGenerated(false);
+
+    try {
+      await client.graphql({
+        query: mutations.deleteDelivery,
+        variables: { input: { id: deliveryId } },
+        authMode: 'apiKey'
+      });
+      toast.success("Delivery removed successfully.");
+    } catch (error) {
+      console.error("Error deleting delivery:", error);
+      toast.error("Failed to delete delivery. Reverting changes.");
+      setBaseRoutes(originalRoutes); // Revert on error
+    }
+  }, [baseRoutes]);
+
+  const handleDeleteDriver = useCallback(async (driverId: string) => {
+    const originalRoutes = [...baseRoutes];
+    const originalDrivers = [...drivers];
+    let deliveriesToReassign: Delivery[] = [];
+
+    const driverRoute = baseRoutes.find(r => r.driverId === driverId);
+    if (driverRoute) {
+      deliveriesToReassign = driverRoute.deliveries;
+    }
+
+    // Optimistic UI Update
+    setDrivers(prevDrivers => prevDrivers.filter(d => d.id !== driverId));
+    const routesWithoutDriver = baseRoutes.filter(r => r.driverId !== driverId);
+    const unassignedRouteIndex = routesWithoutDriver.findIndex(r => r.id === 'unassigned-deliveries-route');
+    if (unassignedRouteIndex !== -1 && deliveriesToReassign.length > 0) {
+      routesWithoutDriver[unassignedRouteIndex].deliveries.push(...deliveriesToReassign);
+    }
+    setBaseRoutes(routesWithoutDriver);
+    setRoutesGenerated(false);
+
+    try {
+      await client.graphql({
+        query: mutations.deleteDriver,
+        variables: { input: { id: driverId } },
+        authMode: 'apiKey'
+      });
+      toast.success("Driver removed successfully.");
+    } catch (error) {
+      console.error("Error deleting driver:", error);
+      toast.error("Failed to delete driver. Reverting changes.");
+      setBaseRoutes(originalRoutes);
+      setDrivers(originalDrivers);
+    }
+  }, [baseRoutes, drivers]);
+  
+  // handleDeleteAll is more complex now. It needs to iterate and delete one by one.
+  // This can be slow, but is the most straightforward implementation.
+  const handleDeleteAllDeliveries = useCallback(async () => {
+    const allDeliveries = baseRoutes.flatMap(r => r.deliveries);
+    if (allDeliveries.length === 0) {
+      toast.info("No deliveries to delete.");
+      return;
+    }
+    
+    const promise = toast.promise(
+      Promise.all(allDeliveries.map(d => client.graphql({ 
+        query: mutations.deleteDelivery, 
+        variables: { input: { id: d.id } },
+        authMode: 'apiKey'
+      }))),
+      {
+        loading: `Deleting ${allDeliveries.length} deliveries...`,
+        success: () => {
+          setBaseRoutes(prev => prev.map(r => ({ ...r, deliveries: [] })));
+          setRoutesGenerated(false);
+          return "All deliveries have been removed.";
+        },
+        error: "Failed to delete all deliveries.",
+      }
+    );
+  }, [baseRoutes]);
+
+  const handleDeleteAllDrivers = useCallback(async () => {
+    if (drivers.length === 0) {
+      toast.info("No drivers to delete.");
+      return;
+    }
+
+    const promise = toast.promise(
+      Promise.all(drivers.map(d => client.graphql({
+        query: mutations.deleteDriver,
+        variables: { input: { id: d.id } },
+        authMode: 'apiKey'
+      }))),
+      {
+        loading: `Deleting ${drivers.length} drivers...`,
+        success: () => {
+          let allDeliveries: Delivery[] = [];
+          setBaseRoutes(prev => {
+            allDeliveries = prev.flatMap(r => r.deliveries);
+            const unassignedRoute = prev.find(r => r.id === 'unassigned-deliveries-route');
+            if (unassignedRoute) {
+              unassignedRoute.deliveries = allDeliveries;
+              return [unassignedRoute];
+            }
+            return [];
+          });
+          setDrivers([]);
+          setRoutesGenerated(false);
+          return "All drivers have been removed.";
+        },
+        error: "Failed to delete all drivers."
+      }
+    );
+  }, [drivers]);
+
+  const handleFinalizeAndSend = useCallback(async (routesToFinalize: Route[]) => {
+    console.log('[handleFinalizeAndSend] Starting finalization process.', { routesToFinalize });
+    const toastId = toast.loading('Finalizing routes and sending emails...');
+    let emailsSent = 0;
+    let emailsSkipped = 0;
+    const emailErrors: string[] = [];
+
+    const allDeliveriesInRoutes = routesToFinalize
+      .filter(r => r.driverId) // only assigned routes
+      .flatMap(r => r.deliveries);
+
+    console.log(`[handleFinalizeAndSend] Found ${allDeliveriesInRoutes.length} deliveries in assigned routes.`);
+
+    if (allDeliveriesInRoutes.length === 0) {
+      toast.error('No deliveries in routes to finalize.', { id: toastId });
+      return;
+    }
+
+    const sendEmailMutation = `
+      mutation SendEmail($to: String!, $customerName: String!, $eta: String!, $summary: String!) {
+        sendEmail(to: $to, customerName: $customerName, eta: $eta, summary: $summary)
+      }
+    `;
+
+    for (const delivery of allDeliveriesInRoutes) {
+
+      if (delivery.name === "Haocheng Fan") {
+        try {
+          const variables = {
+            to: "fhc991115@gmail.com",
+            customerName: delivery.name,
+            eta: delivery.eta || 'Not available',
+            summary: delivery.name,
+          };
+          console.log('[handleFinalizeAndSend] Attempting to send email with variables:', variables);
+          const result = await client.graphql({
+            query: sendEmailMutation,
+            variables,
+            authMode: 'apiKey'
+          });
+          console.log(`[handleFinalizeAndSend] Successfully sent email for delivery ID ${delivery.id}. Result:`, result);
+          emailsSent++;
+        } catch (error) {
+          console.error(`[handleFinalizeAndSend] FAILED to send email for delivery ID ${delivery.id}:`, JSON.stringify(error, null, 2));
+          emailErrors.push(delivery.name);
+        }
+      } else {
+        console.log(`[handleFinalizeAndSend] Skipping email for delivery ID ${delivery.id} due to invalid/missing address.`);
+        emailsSkipped++;
+      }
+    }
+
+    if (emailErrors.length > 0) {
+      toast.error(`Failed to send emails for: ${emailErrors.join(', ')}. Sent ${emailsSent} emails. Skipped ${emailsSkipped}.`, { id: toastId, duration: 10000 });
+    } else {
+      toast.success(`Finalization complete! Sent ${emailsSent} emails. Skipped ${emailsSkipped} addresses.`, { id: toastId });
+    }
+
+    // Send route data to drivers
+    console.log('[handleFinalizeAndSend] Sending route data to drivers...');
+    const routesWithDrivers = routesToFinalize.filter(r => r.driverId && r.deliveries.length > 0);
+    
+    if (routesWithDrivers.length > 0) {
+      console.log('\n' + '='.repeat(80));
+      console.log('📱 MOBILE APP ROUTE DATA - Ready to copy/paste');
+      console.log('='.repeat(80));
+      
+      routesWithDrivers.forEach((route, index) => {
+        const routeData = {
+          driverId: route.driverId,
+          driverName: route.driverName,
+          deliveries: route.deliveries.map(d => ({
+            id: d.id,
+            address: d.address,
+            customerName: d.name,
+            eta: d.eta || 'Not available',
+            lat: d.lat,
+            lng: d.lng
+          }))
+        };
+        
+        console.log(`\n📍 Driver ${index + 1}: ${route.driverName}`);
+        console.log(`📦 ${route.deliveries.length} deliveries assigned`);
+        console.log('📱 Copy this JSON for mobile app:');
+        console.log('─'.repeat(40));
+        console.log(JSON.stringify(routeData, null, 2));
+        console.log('─'.repeat(40));
+        
+        // Also create a one-liner for easy copying
+        const oneLineJson = JSON.stringify(routeData);
+        console.log('📋 One-line version (easier to copy):');
+        console.log(oneLineJson);
+        console.log('');
+      });
+      
+      console.log('📱 How to use in mobile app:');
+      console.log('1. Copy the JSON above');
+      console.log('2. Open mobile app');
+      console.log('3. Tap "Receive Route from Web App"');
+      console.log('4. The app will load the route data');
+      console.log('5. Tap navigation to open maps!');
+      console.log('='.repeat(80) + '\n');
+    } else {
+      console.log('❌ No routes with assigned drivers found');
+    }
+  }, []);
+
+  // handleDragEndStops needs to be removed or adapted, as reordering
+  // is not persisted. For now, let's disable it by passing an empty function.
+  const handleDragEndStops = useCallback(() => {
+    toast.info("Manual reordering is disabled when using a live database.");
   }, []);
 
   const resetOptimizationState = useCallback(() => {
@@ -268,6 +557,7 @@ export const useRoutes = () => {
   }, []);
 
   const handleGenerateRoutes = async () => {
+    console.log('[handleGenerateRoutes] Inspecting deliveries at start of function:', JSON.parse(JSON.stringify(baseRoutes.flatMap(r => r.deliveries))));
     toast.info('Generating optimized routes...');
     setIsLoading(true);
 
@@ -328,7 +618,6 @@ export const useRoutes = () => {
       const solution = solutionData.solution;
       const deliveryMap = new Map(allDeliveries.map((d: Delivery) => [d.id, d]));
 
-      // Create a fresh map of drivers to their colors to persist them across re-generations
       const driverColorMap = new Map(baseRoutes.map(r => [r.driverId, r.color]));
 
       const newRoutes: Omit<Route, 'totalStops' | 'totalDistance' | 'totalDuration'>[] = drivers.map(driver => {
@@ -338,7 +627,24 @@ export const useRoutes = () => {
           .map((stop: Stop): Delivery | null => {
             const originalDelivery = deliveryMap.get(stop.location_id);
             if (!originalDelivery) return null;
-            return { ...originalDelivery, eta: stop.arrival_time, status: 'Scheduled' };
+            const newDelivery: Delivery = {
+              id: originalDelivery.id,
+              name: originalDelivery.name,
+              address: originalDelivery.address,
+              email: originalDelivery.email,
+              lat: originalDelivery.lat,
+              lng: originalDelivery.lng,
+              status: 'Scheduled',
+              duration: originalDelivery.duration,
+              owner: originalDelivery.owner,
+              photoUrl: originalDelivery.photoUrl,
+              notes: originalDelivery.notes,
+              createdAt: originalDelivery.createdAt,
+              updatedAt: originalDelivery.updatedAt,
+              location: originalDelivery.location,
+              eta: stop.arrival_time,
+            };
+            return newDelivery;
           })
           .filter((d: Delivery | null): d is Delivery => d !== null) : [];
         
@@ -351,7 +657,6 @@ export const useRoutes = () => {
         };
       });
 
-      // Find any unassigned deliveries from the solution and add them to the unassigned route
       const assignedDeliveryIds = new Set(Object.values(solution).flatMap(vehicleRoute => (vehicleRoute as Stop[]).map((stop: Stop) => stop.location_id)));
       const unassignedDeliveries = allDeliveries.filter(d => !assignedDeliveryIds.has(d.id));
 
@@ -395,72 +700,11 @@ export const useRoutes = () => {
     setHighlightedDeliveryId(deliveryId);
     setTimeout(() => {
       setHighlightedDeliveryId(null);
-    }, 1500); // Highlight for 1.5 seconds
+    }, 1500);
   }, []);
 
   const handleMarkerClick = useCallback((deliveryId: string) => {
     setSelectedDeliveryId(deliveryId);
-  }, []);
-
-  const handleDeleteDelivery = useCallback((deliveryId: string) => {
-    setBaseRoutes(prevRoutes => {
-      const newRoutes = prevRoutes.map(route => {
-        const newDeliveries = route.deliveries.filter(d => d.id !== deliveryId);
-        return { ...route, deliveries: newDeliveries };
-      });
-      return newRoutes;
-    });
-    setRoutesGenerated(false); // An optimization is now needed
-    toast.success("Delivery removed. You can now re-generate the routes.");
-  }, []);
-
-  const handleDeleteDriver = useCallback((driverId: string) => {
-    let deliveriesToReassign: Delivery[] = [];
-    
-    setBaseRoutes(prevRoutes => {
-      const driverRoute = prevRoutes.find(r => r.driverId === driverId);
-      if (driverRoute) {
-        deliveriesToReassign = driverRoute.deliveries;
-      }
-
-      // Filter out the driver's route
-      const routesWithoutDriver = prevRoutes.filter(r => r.driverId !== driverId);
-
-      // Add deliveries to the unassigned route
-      const unassignedRouteIndex = routesWithoutDriver.findIndex(r => r.id === 'unassigned-deliveries-route');
-      if (unassignedRouteIndex !== -1 && deliveriesToReassign.length > 0) {
-        routesWithoutDriver[unassignedRouteIndex].deliveries.push(...deliveriesToReassign);
-      }
-      
-      return routesWithoutDriver;
-    });
-
-    setDrivers(prevDrivers => prevDrivers.filter(d => d.id !== driverId));
-    
-    setRoutesGenerated(false); // An optimization is now needed
-    toast.success("Driver removed. Deliveries are now unassigned.");
-  }, []);
-
-  const handleDeleteAllDeliveries = useCallback(() => {
-    setBaseRoutes(prev => prev.map(r => ({ ...r, deliveries: [] })));
-    setRoutesGenerated(false);
-    toast.success("All deliveries have been removed.");
-  }, []);
-
-  const handleDeleteAllDrivers = useCallback(() => {
-    let allDeliveries: Delivery[] = [];
-    setBaseRoutes(prev => {
-      allDeliveries = prev.flatMap(r => r.deliveries);
-      const unassignedRoute = prev.find(r => r.id === 'unassigned-deliveries-route');
-      if (unassignedRoute) {
-        unassignedRoute.deliveries = allDeliveries;
-        return [unassignedRoute];
-      }
-      return [];
-    });
-    setDrivers([]);
-    setRoutesGenerated(false);
-    toast.success("All drivers have been removed and deliveries are now unassigned.");
   }, []);
 
   const handleExportRoutes = useCallback(() => {
@@ -496,6 +740,7 @@ export const useRoutes = () => {
     handleGenerateRoutes,
     handleAddDriver,
     handleUploadDeliveries,
+    handleFinalizeAndSend,
     handleDragEndStops,
     handleRouteSelect,
     handleMarkerClick,

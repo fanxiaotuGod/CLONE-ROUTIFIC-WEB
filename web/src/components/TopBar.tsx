@@ -1,7 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
-  CalendarIcon, ArrowDownTrayIcon, ClockIcon, UserPlusIcon, MoonIcon, SunIcon, InboxArrowDownIcon, DocumentArrowUpIcon, CogIcon, CheckCircleIcon, TrashIcon, ExclamationTriangleIcon
+  CalendarIcon, ArrowDownTrayIcon, ClockIcon, UserPlusIcon, MoonIcon, SunIcon, InboxArrowDownIcon, DocumentArrowUpIcon, CogIcon, CheckCircleIcon, TrashIcon, ExclamationTriangleIcon, PlusIcon, ArrowUpTrayIcon, Cog6ToothIcon, ChevronDownIcon, ArrowRightOnRectangleIcon
 } from '@heroicons/react/24/outline';
+import { UserCircleIcon } from '@heroicons/react/24/solid';
+import { WithAuthenticatorProps } from '@aws-amplify/ui-react';
 
 interface TopBarProps {
   selectedDate: string;
@@ -16,6 +18,8 @@ interface TopBarProps {
   onAddDeliveryClick?: () => void;
   onDeleteAllDeliveries?: () => void;
   onDeleteAllDrivers?: () => void;
+  signOut?: WithAuthenticatorProps['signOut'];
+  user?: WithAuthenticatorProps['user'];
 }
 
 const TopBar: React.FC<TopBarProps> = ({
@@ -31,9 +35,13 @@ const TopBar: React.FC<TopBarProps> = ({
   onAddDeliveryClick,
   onDeleteAllDeliveries,
   onDeleteAllDrivers,
+  signOut,
+  user,
 }) => {
   const [isDeleteDropdownOpen, setIsDeleteDropdownOpen] = useState(false);
   const deleteDropdownRef = useRef<HTMLDivElement>(null);
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -101,32 +109,6 @@ const TopBar: React.FC<TopBarProps> = ({
 
         <button onClick={onAddDriver} className="btn btn-secondary btn-sm flex items-center"><UserPlusIcon className="h-4 w-4 mr-1" /> <span className="hidden sm:inline">Add Driver</span></button>
         
-        <div className="relative" ref={deleteDropdownRef}>
-          <button 
-            onClick={() => setIsDeleteDropdownOpen(prev => !prev)} 
-            className="btn btn-danger-outline btn-sm flex items-center" 
-            title="Delete options"
-          >
-            <TrashIcon className="h-4 w-4 mr-1" /> <span className="hidden sm:inline">Delete</span>
-          </button>
-          {isDeleteDropdownOpen && (
-            <div className="absolute right-0 mt-2 w-56 origin-top-right bg-white dark:bg-slate-700 rounded-md shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none py-1 z-50">
-              <button
-                onClick={handleDeleteAllDeliveriesClick}
-                className="w-full text-left px-4 py-2 text-sm text-red-700 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/20 flex items-center"
-              >
-                <ExclamationTriangleIcon className="h-4 w-4 mr-2" /> Delete All Deliveries
-              </button>
-              <button
-                onClick={handleDeleteAllDriversClick}
-                className="w-full text-left px-4 py-2 text-sm text-red-700 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/20 flex items-center"
-              >
-                <ExclamationTriangleIcon className="h-4 w-4 mr-2" /> Delete All Drivers
-              </button>
-            </div>
-          )}
-        </div>
-
         {routesGenerated ? (
           <button onClick={onFinalize} className="btn btn-success btn-sm flex items-center transition-all duration-300 ease-in-out">
             <CheckCircleIcon className="h-4 w-4 mr-1" /> Finalize
@@ -140,6 +122,56 @@ const TopBar: React.FC<TopBarProps> = ({
         <button onClick={onToggleDarkMode} className="ml-1 p-2 rounded-full bg-gray-100 hover:bg-gray-200 dark:bg-slate-700 dark:hover:bg-slate-600 transition-colors">
           {darkMode ? <SunIcon className="h-5 w-5 text-yellow-400" /> : <MoonIcon className="h-5 w-5 text-slate-500" />}
         </button>
+
+        {/* User Menu */}
+        <div className="relative">
+          <button onClick={() => setIsMenuOpen(!isMenuOpen)} className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-slate-700 transition-colors">
+            <UserCircleIcon className="h-8 w-8 text-gray-500 dark:text-slate-400" />
+          </button>
+
+          {isMenuOpen && (
+            <div className="absolute right-0 mt-2 w-64 bg-white dark:bg-slate-800 rounded-lg shadow-lg border border-gray-200 dark:border-slate-700 py-2 z-50">
+              {user && (
+                <div className="px-4 py-2 border-b border-gray-200 dark:border-slate-700">
+                  <p className="text-sm font-medium text-gray-900 dark:text-slate-200">Signed in as</p>
+                  <p className="text-sm text-gray-600 dark:text-slate-400 truncate">{(user as any).attributes?.email}</p>
+                </div>
+              )}
+              <div className="py-1">
+                <button
+                  onClick={onToggleDarkMode}
+                  className="w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-slate-700 flex items-center"
+                >
+                  <Cog6ToothIcon className="h-5 w-5 mr-3" />
+                  <span>Toggle {darkMode ? 'Light' : 'Dark'} Mode</span>
+                </button>
+                <button
+                  onClick={onDeleteAllDeliveries}
+                  className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 flex items-center"
+                >
+                  <TrashIcon className="h-5 w-5 mr-3" />
+                  <span>Delete All Deliveries</span>
+                </button>
+                <button
+                  onClick={onDeleteAllDrivers}
+                  className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 flex items-center"
+                >
+                  <TrashIcon className="h-5 w-5 mr-3" />
+                  <span>Delete All Drivers</span>
+                </button>
+              </div>
+              <div className="py-1 border-t border-gray-200 dark:border-slate-700">
+                <button
+                  onClick={signOut}
+                  className="w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-slate-700 flex items-center"
+                >
+                  <ArrowRightOnRectangleIcon className="h-5 w-5 mr-3" />
+                  <span>Sign Out</span>
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

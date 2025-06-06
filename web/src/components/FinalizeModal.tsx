@@ -22,7 +22,7 @@ const FinalizeModal: React.FC<FinalizeModalProps> = ({ open, onClose, onFinalize
           {summary && <p className="mt-1 text-sm">Summary: {summary}</p>}
           <p className="mt-2 text-sm text-gray-500">Below is the email template that will be used for all customers. Dynamic fields will be filled automatically.</p>
         </div>
-        <pre className="bg-gray-50 border rounded p-3 text-xs overflow-x-auto mb-4 whitespace-pre-wrap">{EMAIL_TEMPLATE}</pre>
+        <pre className="bg-gray-50 border rounded p-3 text-xs overflow-x-auto mb-4 whitespace-pre-wrap text-gray-800">{EMAIL_TEMPLATE}</pre>
         {error && <div className="text-red-600 text-sm mb-2">{error}</div>}
         <div className="flex justify-end space-x-3 mt-4">
           <button onClick={onClose} className="btn btn-secondary">Cancel</button>

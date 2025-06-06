@@ -1,28 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { GoogleMap, useJsApiLoader, Marker, DirectionsRenderer } from '@react-google-maps/api';
-
-interface Delivery {
-  id: string
-  name: string
-  address: string
-  email?: string
-  location: {
-    lat: number
-    lng: number
-  }
-  status: string
-  eta: string
-  photo_url?: string
-  notes?: string
-}
-
-interface Route {
-  id: string;
-  driverId: string | null;
-  driverName: string;
-  deliveries: Delivery[];
-  color: string;
-}
+import type { Route, Delivery } from '../hooks/useRoutes';
 
 interface MapViewProps {
   routes: Route[];
@@ -57,9 +35,17 @@ const MapView: React.FC<MapViewProps> = ({ routes, onMarkerClick, deliveryColorM
     libraries, // Start with empty, we'll use DirectionsService directly
   });
 
+  // Automatically fit map to routes whenever they change
+  useEffect(() => {
+    fitMapToRoutes();
+  }, [routes, mapInstance]);
+
   // Function to fit map to show all routes and deliveries
   const fitMapToRoutes = () => {
     if (!mapInstance || !routes || routes.length === 0) return;
+
+    const allDeliveries = routes.flatMap(r => r.deliveries);
+    if (allDeliveries.length === 0) return;
 
     const bounds = new google.maps.LatLngBounds();
     
